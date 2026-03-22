@@ -1,6 +1,6 @@
 # Claw2Cli 设计文档
 
-> 最后更新：2026-03-22（Phase 1 实现完成后同步）
+> 最后更新：2026-03-23（Phase 1 实测微信插件后同步）
 
 ## 1. 项目定位
 
@@ -58,8 +58,8 @@ emoji: 🔧
 
 - **特征：** 有状态，长连接
 - **例子：** 微信、飞书、Discord、Slack
-- **调用方式：** `c2c connect <connector-name>` → 启动后台守护进程
-- **生命周期：** 守护进程维持长连接心跳 → CLI 通过 IPC 交互 → 显式断开或超时退出
+- **调用方式：** `c2c connect <connector-name>` → 前台运行（默认），可见 QR 码等交互提示；加 `-b` 后台运行
+- **生命周期：** 守护进程维持长连接心跳 → CLI 通过 IPC 交互 → Ctrl+C 或 `c2c stop` 退出
 - **权限：** 受控高权限 — 允许网络访问 + 持久状态存储 + 凭证管理
 
 ### 权限差异总结
@@ -110,6 +110,10 @@ Go 解析 SKILL.md → 构造 npx 调用命令 → 子进程执行 → 收集 st
 - **隔离性：** 插件崩溃仅影响子进程，不会带走 Go 主程序
 - **版本控制：** 从 SKILL.md 解析版本需求，动态调用 `npx @package@version`
 - **零 JS 依赖：** Go 二进制本身不需要 Node.js，插件的 Node 依赖通过 npx 按需获取
+
+**ESM + TypeScript 支持：** OpenClaw 大厂插件（微信、飞书）使用 `"type": "module"` + TypeScript 源码发布（无预编译 JS）。Claw2Cli 通过 [tsx](https://github.com/privatenumber/tsx) 替代 node 运行 shim，支持 ESM `import()` 和 TypeScript 直接加载。tsx 在首次 `c2c connect` 时自动全局安装。
+
+**CLI 包 vs 运行时包：** 部分插件拆分为两个 npm 包——CLI 安装器（如 `@tencent-weixin/openclaw-weixin-cli`）和实际运行时（如 `@tencent-weixin/openclaw-weixin`）。`c2c install` 和 daemon 均通过 `resolvePluginPackage()` 自动识别并安装两者。
 
 ### 4.3 JS-Go 桥接通道
 
@@ -164,6 +168,8 @@ Go daemon
 | `C2C_PLUGIN_TYPE` | `skill` 或 `connector` |
 | `C2C_STORAGE_DIR` | 插件专属存储路径（`~/.c2c/storage/<name>`） |
 | `C2C_BASE_DIR` | c2c 根目录（`~/.c2c`） |
+| `C2C_PLUGIN_SOURCE` | 原始 npm 包名（如 `@tencent-weixin/openclaw-weixin-cli@latest`） |
+| `NODE_PATH` | `shim/node_modules` + 全局 `node_modules`（模块路径劫持） |
 
 ### 4.4 连接型插件的守护进程模型
 
@@ -172,16 +178,26 @@ Go daemon
 **实现方式：** 由于 Go 不支持真正的 fork，采用 **隐藏子命令重新调用自身** 的模式：
 
 ```
-c2c connect wechat
+c2c connect wechat          # 前台模式（默认）：直接运行 daemon，终端可见 QR 码
+c2c connect wechat -b       # 后台模式：通过 Setsid 脱离终端
+
+前台模式：
+    Go 直接调用 runDaemon()
     │
-    ▼
-Go 执行 `c2c _daemon wechat`（隐藏子命令），通过 Setsid 脱离终端
+    ├─ 子进程: tsx c2c-shim.js wechat（支持 ESM + TypeScript）
+    ├─ stdout → 解析 NDJSON，打印日志/事件到终端
+    ├─ stderr → 直通终端（QR 码等交互输出）
+    ├─ Ctrl+C → SIGTERM → 等 3s → SIGKILL
+    └─ 监听 UDS（支持 attach 并行连接）
+
+后台模式：
+    Go 执行 `c2c _daemon wechat`（隐藏子命令），通过 Setsid 脱离终端
     │
-    ├─ _daemon 进程启动子进程握住 npx @tencent-weixin/openclaw-weixin-cli
-    ├─ 读取插件 stdout/stderr，广播为 NDJSON 消息
-    ├─ 监听 UDS (~/.c2c/sockets/wechat.sock)，接受客户端连接
+    ├─ 子进程: tsx c2c-shim.js wechat
+    ├─ stdout/stderr → 广播为 NDJSON 消息
+    ├─ 监听 UDS (~/.c2c/sockets/wechat.sock)
     ├─ PID 记录到 ~/.c2c/pids/wechat.pid
-    ├─ 元数据记录到 ~/.c2c/pids/wechat.json（name, pid, socket, started_at）
+    ├─ 元数据记录到 ~/.c2c/pids/wechat.json
     └─ 日志写入 ~/.c2c/logs/wechat.log
 
 c2c list          → 扫描 PID 文件，检查进程存活
@@ -224,6 +240,7 @@ c2c stop wechat   → SIGTERM → 等待 5s → SIGKILL，清理 PID/socket/meta
 **MVP（Phase 1）— 静态防御：**
 - **包完整性校验：** `c2c install` 时记录 npm 包 sha512 hash（已实现）。运行前校验尚未实现，列入 Phase 2
 - **声明式权限清单：** c2c 在自己的 manifest 层面维护权限声明（不侵入上游 SKILL.md 协议），运行前静态拦截（已实现，Permission Guard 在 `os/exec` 之前检查）
+- **安装预检：** `c2c install` 在安装前验证 node/npm 可用性和 shim 文件完整性，提前暴露环境问题
 
 权限清单通过 c2c 自有的 manifest 文件管理（不修改上游 SKILL.md）：
 ```yaml
@@ -317,11 +334,11 @@ Go Daemon (进程管理 + UDS 对外)
     ├─ stdin  → 写入命令给 shim（如：发送消息回复）
     ├─ stdout ← 读取事件从 shim（如：收到微信消息）
     │
-    └─ 子进程: node c2c-shim.js <plugin-name>
+    └─ 子进程: tsx c2c-shim.js <plugin-name>    ← tsx 支持 ESM + TypeScript
                  │
-                 ├─ NODE_PATH 指向 shim/node_modules（假 SDK）
+                 ├─ NODE_PATH 指向 shim/node_modules（假 SDK）+ 全局 node_modules
                  │
-                 └─ require("@tencent-weixin/openclaw-weixin")
+                 └─ import("@tencent-weixin/openclaw-weixin")   ← 动态 import
                       │
                       └─ require("openclaw/plugin-sdk") → 我们的 shim
                            │
@@ -337,7 +354,7 @@ Go Daemon (进程管理 + UDS 对外)
 
 | 类别 | 函数 | Shim 行为 |
 |------|------|-----------|
-| 核心 | `reply.dispatchReplyFromConfig` | 不调 LLM，通过 stdout NDJSON 转发给 Go，等 stdin 回复 |
+| 核心 | `reply.dispatchReplyFromConfig` | 不调 LLM，通过 stdout NDJSON 转发给 Go，等 stdin 回复（5 分钟超时） |
 | 核心 | `reply.createReplyDispatcherWithTyping` | 包装 dispatch + typing indicator |
 | 核心 | `media.saveMediaBuffer` | 保存到 `C2C_STORAGE_DIR/media/` |
 | 最小 | `routing.resolveAgentRoute` | 返回默认 route |
@@ -373,10 +390,14 @@ Go Daemon (进程管理 + UDS 对外)
 - [x] Plugin Shim（npx 子进程桥接，带超时和权限检查）
 - [x] Connector 守护进程管理（start/stop/attach/status/logs）
 - [x] MCP Server（mcp-go，动态工具注册，支持 --skills/--connectors 过滤）
-- [x] 插件安装（`c2c install`，自动生成 manifest，记录 checksum）
+- [x] 插件安装（`c2c install`，自动生成 manifest，记录 checksum，预检 node/npm/shim，预装运行时包）
 - [x] NDJSON 协议层（5 种消息类型 + source 字段 + 编解码器）
 - [x] 声明式权限守卫（运行前拦截）
 - [x] 存储目录隔离（0700 权限）
+- [x] ESM + TypeScript 支持（tsx 运行 shim，动态 import，自动安装 tsx）
+- [x] 前台/后台双模式连接（默认前台可见 QR 码，`-b` 后台守护进程）
+- [x] 优雅关闭（Ctrl+C → SIGTERM → 3s 超时 → SIGKILL）
+- [x] 微信插件实测通过（安装、扫码登录、Gateway 启动）
 - [x] 单元测试覆盖率：internal/ 包 63.1%（executor 90.8%, mcp 85.9%, parser/config 100%）
 
 ### Phase 2：插件扩展 + 安全加固
@@ -410,6 +431,10 @@ Go Daemon (进程管理 + UDS 对外)
 | TUI | Phase 3，不进 MVP | MVP 核心用户是 Agent 不是人类，先 `c2c status` + `c2c logs -f` |
 | 配置格式 | YAML | manifest 是 YAML，SKILL.md frontmatter 是 YAML，统一格式 |
 | Daemon 实现 | 隐藏子命令 `c2c _daemon` + Setsid | Go 不支持 fork，重新调用自身最可靠 |
+| Node 运行器 | tsx 优先，node 兜底 | 大厂插件发布 ESM + TS 源码，无预编译 JS，tsx 是最轻量的加载方案 |
+| connect 默认模式 | 前台运行，`-b` 切后台 | 首次登录需看 QR 码，前台更直觉；已登录后可 `-b` 后台 |
+| 关闭超时 | SIGTERM → 3s → SIGKILL | 插件可能阻塞在 get_reply 等待，不能无限等 |
+| CLI 包 vs 运行时包 | 自动识别并安装两者 | 如 `-cli` 是安装器，实际运行时是去掉 `-cli` 的包 |
 
 ## 9. 待定决策
 

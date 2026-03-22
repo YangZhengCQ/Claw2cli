@@ -19,8 +19,11 @@ go install github.com/user/claw2cli@latest
 # Install a plugin
 c2c install @tencent-weixin/openclaw-weixin-cli --type connector
 
-# Start WeChat connector
+# Start WeChat connector (foreground — shows QR code for login)
 c2c connect wechat
+
+# Or run in background
+c2c connect wechat -b
 
 # Check status
 c2c status
@@ -34,6 +37,7 @@ c2c run search --query "AI news"
 
 - **Go 1.22+** (build only)
 - **Node.js 18+** and npm (runtime — plugins are npm packages)
+- **[tsx](https://github.com/privatenumber/tsx)** (auto-installed on first `connect` — needed for ESM + TypeScript plugins)
 - **macOS** or **Linux** (Windows is not supported)
 
 ## CLI Reference
@@ -41,7 +45,7 @@ c2c run search --query "AI news"
 | Command | Description |
 |---------|-------------|
 | `c2c run <skill> [args]` | Run a skill plugin (one-shot) |
-| `c2c connect <connector>` | Start a connector daemon (background) |
+| `c2c connect <connector>` | Start a connector (foreground by default, `-b` for background) |
 | `c2c stop <connector>` | Stop a running connector |
 | `c2c attach <connector>` | Stream messages from a running connector |
 | `c2c status` | Show status of running connectors |
@@ -137,7 +141,7 @@ More plugins will be added as the project matures. In principle, any OpenClaw-co
 ## Development
 
 ```bash
-git clone https://github.com/user/claw2cli.git
+git clone https://github.com/YangZhengCQ/Claw2cli.git
 cd claw2cli
 make build    # Build binary
 make test     # Run tests
