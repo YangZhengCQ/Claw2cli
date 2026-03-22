@@ -53,6 +53,14 @@ function loadConfig() {
 // Load and register the plugin
 // ---------------------------------------------------------------------------
 
+// Wait for SIGTERM/SIGINT — used by skill-only plugins that have no gateway loop
+function waitForShutdown() {
+  return new Promise((resolve) => {
+    process.on("SIGTERM", () => { sendLog(pluginName, "info", "Received SIGTERM, shutting down..."); resolve(); });
+    process.on("SIGINT", () => { sendLog(pluginName, "info", "Received SIGINT, shutting down..."); resolve(); });
+  });
+}
+
 // Build a hybrid logger: callable as function + has .debug/.info/.warn/.error methods
 function buildAccountLogger(accountId) {
   const fn = (msg) => sendLog(pluginName, "info", `[${accountId}] ${msg}`);
@@ -105,8 +113,10 @@ async function main() {
 
   const channel = getRegisteredChannel();
   if (!channel) {
-    sendLog(pluginName, "error", "Plugin did not register a channel");
-    process.exit(1);
+    // Skill-only plugin (tools registered but no channel) — stay alive for tool invocations
+    sendLog(pluginName, "info", "No channel registered (skill-only plugin). Waiting for tool calls...");
+    await waitForShutdown();
+    return;
   }
 
   sendLog(pluginName, "info", `Channel ${channel.id} registered`);
