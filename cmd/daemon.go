@@ -46,10 +46,16 @@ func shimDir() string {
 	if err != nil {
 		return "shim"
 	}
+	binDir := filepath.Dir(self)
 	// Check if shim/ exists next to the binary
-	dir := filepath.Join(filepath.Dir(self), "shim")
+	dir := filepath.Join(binDir, "shim")
 	if _, err := os.Stat(dir); err == nil {
 		return dir
+	}
+	// Homebrew: shim is in ../libexec/shim relative to bin/
+	libexecDir := filepath.Join(binDir, "..", "libexec", "shim")
+	if _, err := os.Stat(libexecDir); err == nil {
+		return libexecDir
 	}
 	// Fallback: look in the current working directory
 	if _, err := os.Stat("shim"); err == nil {

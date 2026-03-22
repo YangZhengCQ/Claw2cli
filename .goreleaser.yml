@@ -1,0 +1,59 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: c2c
+    binary: c2c
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}}
+
+archives:
+  - id: c2c-archive
+    builds: [c2c]
+    format: tar.gz
+    name_template: "c2c_{{ .Os }}_{{ .Arch }}"
+    # Include shim files alongside the binary
+    files:
+      - shim/**/*
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "Co-Authored-By"
+
+brews:
+  - repository:
+      owner: YangZhengCQ
+      name: homebrew-tap
+    name: c2c
+    homepage: https://github.com/YangZhengCQ/Claw2cli
+    description: "Wrap OpenClaw plugins as standard CLI tools"
+    license: MIT
+    dependencies:
+      - name: node
+        type: recommended
+    # After install, copy shim files to libexec
+    install: |
+      libexec.install Dir["shim"]
+      bin.install "c2c"
+    test: |
+      assert_match "c2c", shell_output("#{bin}/c2c --help")
