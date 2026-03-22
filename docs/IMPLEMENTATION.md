@@ -257,6 +257,8 @@ Skill tools: receive `args` string → split → pass to npx subprocess
 Connector tools (static): receive `action` string → dispatch to StartConnector/StopConnector/UDS forward
 Connector tools (dynamic): `registerDynamicTools()` queries each running connector via UDS `list_tools`, registers discovered tools with handlers that forward `invoke_tool` via `InvokeTool()`
 
+**Verified end-to-end:** MCP `tools/call("wechat_send_text", {to, text})` → UDS → daemon → shim bridge (auto-resolve accountId, get contextToken) → `sendMessageWeixin` → message delivered.
+
 ## 9. Key Functions Reference
 
 | Function | File | Purpose |

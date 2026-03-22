@@ -154,3 +154,69 @@ func AttachConnector(name string) (net.Conn, error) {
 **当前状态：** 已通过 `c2c echo` 测试消费者验证了回复链路。echo 连接后 `get_reply` 立即得到回复，不再阻塞。
 
 **后续方向：** 需要真正的消费者（MCP 客户端 / LLM 调用）来处理 `get_reply`。daemon 本身是透明管道，不应该内置回复逻辑。
+
+---
+
+## 8. Socket 文件消失（defer os.Remove 竞态）
+
+**现象：** 后台模式 `c2c connect wechat -b` 启动后，`~/.c2c/sockets/wechat.sock` 在文件系统上不存在，但 `lsof` 能看到 daemon 在监听该路径。`c2c call --list-tools` 和 MCP 均连接失败。
+
+**排查过程：**
+1. `lsof -p <daemon-pid>` 显示 fd 5 绑定了 `wechat.sock` — 内核确认 socket 存在
+2. `ls ~/.c2c/sockets/` 为空 — 文件系统上不可见
+3. 前台模式 socket 正常可见，后台模式不行
+4. 检查代码发现 `daemon.go` 有 `defer os.Remove(socketPath)`
+
+**根因：** `StopConnector` 发 SIGTERM 给旧 daemon → `cleanupConnectorFiles` 删除旧 socket → 启动新 daemon → 新 daemon 创建 socket → **旧 daemon 进程退出时 `defer os.Remove(socketPath)` 触发 → 删掉了新 daemon 的 socket**。
+
+时序竞态：
+```
+t=0  stop: SIGTERM → old daemon
+t=1  stop: cleanupConnectorFiles → 删 socket（旧的）
+t=2  start: 新 daemon 启动
+t=5  start: 新 daemon 创建 socket（新的）✅
+t=9  旧 daemon defer 触发 → os.Remove(socketPath) → 删了新 socket ❌
+```
+
+**解决方案：** 去掉 `defer os.Remove(socketPath)`。Socket 清理只由 `StopConnector.cleanupConnectorFiles` 和 daemon 启动时的 `os.Remove(socketPath)` 负责。
+
+**教训：** detached 子进程的 `defer` 清理可能在任意时间点触发。共享文件路径的清理不要用 defer，要用显式的生命周期管理。
+
+---
+
+## 9. contextToken 缺失导致发送失败
+
+**现象：** 通过 MCP `tools/call wechat_send_text` 发送消息，返回 `INVOKE_FAILED: contextToken is required`。
+
+**排查过程：**
+1. 微信插件的 `sendWeixinOutbound` 要求 `contextToken` 参数
+2. `contextToken` 是从 inbound 消息中缓存的——用户发消息时，插件自动记录每个 `(accountId, to)` 的 token
+3. daemon 重启后缓存丢失，没有 context token 就无法回复
+
+**根因：** 微信 API 要求 outbound 消息携带从 inbound 获取的 context token（防止主动骚扰）。必须先收到用户消息建立上下文，才能回复。
+
+**解决方案：** 这是微信平台的设计约束，不是 bug。用户需要先给机器人发一条消息，shim 缓存 context token 后即可正常回复。
+
+**教训：** 即时通讯平台通常有 context/session 要求，不能无条件主动发消息。Capability Discovery 应该在 tool description 中说明这类约束。
+
+---
+
+## 10. accountId 未自动解析
+
+**现象：** MCP 调用 `wechat_send_text` 只传了 `to` 和 `text`，没传 `accountId`，插件报错 `accountId is required (no default account)`。
+
+**排查过程：**
+1. `handleInvokeTool` 直接把 `args.accountId`（undefined）传给插件
+2. 插件的 `resolveWeixinAccount(cfg, undefined)` 不接受空 accountId
+
+**根因：** shim bridge 没有自动 fallback 到默认账号。
+
+**解决方案：** 在 `handleInvokeTool` 中，如果 `args.accountId` 为空，自动从 `channel.config.listAccountIds()` 取第一个账号：
+```javascript
+if (!accountId && registeredChannel.config?.listAccountIds) {
+  const ids = registeredChannel.config.listAccountIds(globalConfig);
+  if (ids?.length > 0) accountId = ids[0];
+}
+```
+
+**教训：** Bridge 函数要对调用者友好——能自动推断的参数就不要强制要求。单账号场景是最常见的 case。
