@@ -196,6 +196,7 @@ func derivePluginName(source string) string {
 	aliases := map[string]string{
 		"openclaw-weixin-cli": "wechat",
 		"openclaw-feishu-cli": "feishu",
+		"openclaw-lark":       "feishu",
 	}
 	if alias, ok := aliases[s]; ok {
 		return alias

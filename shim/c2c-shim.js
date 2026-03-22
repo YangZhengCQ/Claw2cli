@@ -53,6 +53,16 @@ function loadConfig() {
 // Load and register the plugin
 // ---------------------------------------------------------------------------
 
+// Build a hybrid logger: callable as function + has .debug/.info/.warn/.error methods
+function buildAccountLogger(accountId) {
+  const fn = (msg) => sendLog(pluginName, "info", `[${accountId}] ${msg}`);
+  fn.debug = (msg) => sendLog(pluginName, "debug", `[${accountId}] ${msg}`);
+  fn.info = fn;
+  fn.warn = (msg) => sendLog(pluginName, "warn", `[${accountId}] ${msg}`);
+  fn.error = (msg) => sendLog(pluginName, "error", `[${accountId}] ${msg}`);
+  return fn;
+}
+
 async function main() {
   sendLog(pluginName, "info", `c2c-shim starting for ${pluginName} (${pluginSource})`);
 
@@ -137,7 +147,7 @@ async function main() {
         setStatus: (status) => {
           sendEvent(pluginName, "account.status", { accountId, status });
         },
-        log: (msg) => sendLog(pluginName, "info", `[${accountId}] ${msg}`),
+        log: buildAccountLogger(accountId),
       }).catch((err) => {
         sendLog(pluginName, "error", `Account ${accountId} error: ${err.message}`);
         sendEvent(pluginName, "account.error", { accountId, error: err.message });
@@ -206,6 +216,6 @@ async function startLogin(channel, config) {
 // ---------------------------------------------------------------------------
 
 main().catch((err) => {
-  sendLog(pluginName, "error", `Fatal: ${err.message}`);
+  sendLog(pluginName, "error", `Fatal: ${err.message}\n${err.stack}`);
   process.exit(1);
 });
