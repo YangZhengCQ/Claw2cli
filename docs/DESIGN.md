@@ -507,19 +507,34 @@ The shim's bridge functions wrap plugin internals into clean, agent-friendly ope
 - GitHub Actions CI with `go vet`, `go test -race`, coverage, build matrix
 - `-race` flag in all test targets
 
-### Phase 2: Plugin Expansion
-- More connectors (Feishu, Discord)
-- More skills (search)
-- Runtime checksum verification
-- Runtime sandbox (sandbox-exec, seccomp-bpf)
-- macOS Keychain integration
-- Plugin update management (`c2c update`)
+### Phase 2: Plugin Expansion + Hardening (in progress)
+
+**✅ Done:**
+- [x] Multi-plugin compatibility: 7 plugins tested, 6 load successfully, 39 tools discovered
+  - Connectors: WeChat (E2E), Feishu/Lark (27 tools), QQ Bot (3), WeCom (3)
+  - Skills: Web Search (2 tools), Tavily (5, needs API key)
+  - DingTalk blocked by upstream dep bug (not c2c)
+- [x] Skill-only plugin support (plugins without channel registration stay alive for tool calls)
+- [x] Security hardening: path traversal prevention, env var filtering, 0700 perms, JSON injection fix
+- [x] Code quality: extracted `internal/nodeutil/` + `internal/registry/`, daemon.go -23% LOC
+- [x] GitHub Actions CI: `go vet`, `go test -race`, coverage, Go 1.22/1.23 matrix
+- [x] Shim API surface expanded: `api.logger`, `api.config`, `api.on/emit`, `api.registerTool`, `api.registerCommand`, `api.registerService`
+
+**Remaining:**
+- [ ] Runtime checksum verification (checksums recorded on install, verification before execution)
+- [ ] Runtime sandbox (macOS `sandbox-exec`, Linux `seccomp-bpf`)
+- [ ] macOS Keychain credential integration
+- [ ] Plugin update management (`c2c update <plugin>`)
+- [ ] Feishu/QQ Bot/WeCom full E2E testing (login + send/receive)
+- [ ] DingTalk: monitor upstream fix for `@mariozechner/pi-ai` dep
 
 ### Phase 3: Stabilization + Ecosystem
-- Daemon management improvements
-- TUI dashboard (bubbletea)
-- Plugin contribution guide
+- Daemon process management improvements (auto-restart, health check)
+- TUI monitoring dashboard (bubbletea)
+- `c2c run` for skill-only plugins (currently only works via `connect` + `call`)
+- Plugin contribution guide + template
 - Homebrew / APT distribution
+- Remove dead `internal/config` package + Viper dependency
 
 ## 7. Design Decisions
 
