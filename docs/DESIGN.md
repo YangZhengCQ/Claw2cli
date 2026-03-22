@@ -1,6 +1,6 @@
 # Claw2Cli Design Document
 
-> Last updated: 2026-03-23 (after Phase 1 WeChat plugin live test)
+> Last updated: 2026-03-23 (added Capability Discovery as core architecture)
 
 ## Table of Contents
 
@@ -17,6 +17,7 @@
   - [4.7 Storage Isolation](#47-storage-isolation)
   - [4.8 MCP Server](#48-mcp-server)
   - [4.9 Plugin Runtime Shim](#49-plugin-runtime-shim)
+  - [4.10 Capability Discovery](#410-capability-discovery)
 - [5. Target Platforms](#5-target-platforms)
 - [6. Roadmap](#6-roadmap)
 - [7. Design Decisions](#7-design-decisions)
@@ -198,9 +199,11 @@ User / Agent / Script
 ├──────┴───────────┤
 │   Plugin Shim     │  ← SKILL.md parser + tsx/npx bridge
 ├──────────────────┤
+│ Cap. Discovery    │  ← introspect plugin → surface as tools
+├──────────────────┤
 │ Permission Guard  │  ← manifest-based access control
 ├──────────────────┤
-│  MCP Server       │  ← JSON-RPC over stdio
+│  MCP Server       │  ← JSON-RPC over stdio (dynamic tools from capabilities)
 └──────────────────┘
         │
         ▼
@@ -297,6 +300,89 @@ Go Daemon (process management + UDS)
 - `@tencent-weixin/openclaw-weixin` (WeChat)
 - `@larksuite/openclaw-lark` (Feishu) — requires 20+ utility function stubs
 
+### 4.10 Capability Discovery
+
+**Problem:** Plugins expose rich capabilities (send text, send media, multi-account, slash commands, agent prompts), but c2c currently treats all connectors as opaque message pipes. CLI users, MCP agents, and scripts have no way to discover what a plugin can do or how to invoke its features.
+
+**Example — WeChat plugin capabilities (hidden today):**
+
+| Capability | Plugin source | Currently exposed? |
+|------------|--------------|-------------------|
+| Receive messages | `gateway.startAccount` → long-poll | ✅ via `message.received` event |
+| Send text reply | `outbound.sendText` | ❌ Only via `get_reply` response |
+| Send media (image/file) | `outbound.sendMedia` (local path + remote URL) | ❌ Not exposed |
+| Multi-account | `config.listAccountIds` / `resolveAccount` | ❌ Not exposed |
+| Slash commands | `/echo`, `/toggle-debug` | ❌ Handled inside plugin, invisible to c2c |
+| Agent prompt hints | `agentPrompt.messageToolHints` | ❌ Not exposed to MCP |
+| Chat types | `capabilities.chatTypes: ["direct"]` | ❌ Not exposed |
+| Media support | `capabilities.media: true` | ❌ Not exposed |
+| Text chunk limit | `outbound.textChunkLimit: 4000` | ❌ Not exposed |
+
+**Design: Three-layer capability surfacing**
+
+```
+Layer 1: Plugin declares capabilities (already exists in plugin source code)
+    │
+    ▼
+Layer 2: Shim introspects and reports (new — shim → daemon at startup)
+    │
+    ▼
+Layer 3: c2c exposes to consumers (new — CLI commands + MCP tools + UDS schema)
+```
+
+**Layer 2 — Shim introspection:**
+
+After `plugin.register(api)`, the shim reads the registered channel object and emits a `capabilities.declared` event:
+
+```jsonl
+{"type":"event","source":"wechat","topic":"capabilities.declared","payload":{
+  "channel": "openclaw-weixin",
+  "chatTypes": ["direct"],
+  "media": true,
+  "textChunkLimit": 4000,
+  "outbound": ["sendText", "sendMedia"],
+  "auth": ["login"],
+  "slashCommands": ["/echo", "/toggle-debug"],
+  "agentHints": [
+    "To send an image, use action='send_media' with 'media' set to a local path or URL.",
+    "..."
+  ],
+  "accounts": ["3ffc51ae8b27_im_bot"]
+}}
+```
+
+**Layer 3 — Consumer-facing exposure:**
+
+| Consumer | How capabilities surface |
+|----------|------------------------|
+| **MCP** | Each outbound method becomes a tool: `wechat_send_text(to, text)`, `wechat_send_media(to, media_url)`. Agent hints injected into tool descriptions. |
+| **CLI** | `c2c send wechat --to <id> --text "hello"`, `c2c send wechat --to <id> --media /path/to/img.png`. `c2c info wechat` shows full capability table. |
+| **UDS clients** | Capabilities cached in daemon memory. New `capabilities.query` command returns the full schema. Scripts can query before acting. |
+| **Agent prompts** | `agentPrompt.messageToolHints` from plugin are forwarded as MCP tool descriptions, so LLMs know how to use each tool correctly. |
+
+**Capability-driven MCP tool generation:**
+
+Current (static, hardcoded actions):
+```
+wechat → 1 MCP tool with action: start | stop | status
+```
+
+Target (dynamic, from capabilities):
+```
+wechat → N MCP tools:
+  - wechat_status        (action: status)
+  - wechat_send_text     (params: to, text)
+  - wechat_send_media    (params: to, media_url, text?)
+  - wechat_accounts      (action: list_accounts)
+```
+
+**Key design principles:**
+
+1. **Plugin-agnostic:** The discovery mechanism reads from the standard `ChannelPlugin` interface. Adding a new plugin (Feishu, Discord) automatically gets capability surfacing — no daemon code changes.
+2. **Lazy introspection:** Capabilities are only read after `plugin.register()` succeeds, not from static config. This captures the plugin's actual runtime state.
+3. **Agent-first:** The primary consumer of capabilities is an LLM agent (via MCP). Tool descriptions and agent hints are first-class outputs, not afterthoughts.
+4. **Graceful degradation:** If a plugin doesn't declare capabilities (older/simpler plugins), fall back to the current opaque pipe behavior.
+
 ## 5. Target Platforms
 
 - macOS (darwin/arm64, darwin/amd64)
@@ -306,6 +392,14 @@ Go Daemon (process management + UDS)
 ## 6. Roadmap
 
 ### Phase 1: Core Framework + WeChat MVP ✅ Complete
+
+### Phase 1.5: Capability Discovery (next)
+- Shim introspects `ChannelPlugin` interface after registration → emits `capabilities.declared`
+- Daemon caches capabilities per connector
+- MCP Server generates tools dynamically from capabilities (`send_text`, `send_media`, etc.)
+- CLI: `c2c send <connector> --to <id> --text/--media`
+- `c2c info <plugin>` shows full capability table
+- Agent prompt hints forwarded as MCP tool descriptions
 
 ### Phase 2: Plugin Expansion + Security Hardening
 - More connectors (Feishu, Discord)
@@ -335,6 +429,8 @@ Go Daemon (process management + UDS)
 | Shutdown timeout | SIGTERM → 3s → SIGKILL | Prevent blocking from pending `get_reply` |
 | CLI vs runtime pkg | Auto-detect and install both | `-cli` suffix = installer wrapper, strip for runtime |
 | Security strategy | Phase 1: hash + declarative perms; Phase 2: runtime sandbox | Layered defense, don't block delivery |
+| Capability discovery | Shim introspects at runtime, not from static config | Captures actual plugin state; adding new plugins needs zero daemon changes |
+| MCP tool generation | Dynamic from capabilities, not hardcoded actions | Each plugin ability becomes a typed tool; agents get precise descriptions |
 
 ## 8. Open Questions
 
