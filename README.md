@@ -1,65 +1,67 @@
 # Claw2Cli (c2c)
 
-> 把 OpenClaw 插件变成标准 CLI 工具。无 Docker，无浏览器，只需一个二进制。
+[中文文档](README_CN.md)
 
-## 这是什么
+> Wrap OpenClaw plugins as standard CLI tools. No Docker, no browser, just a binary.
 
-[OpenClaw](https://github.com/openclaw/openclaw) 是一个流行的 AI 助手平台，拥有 78 个扩展和 52 个技能。腾讯、字节、Kimi 等大厂正在为其发布高质量插件 — 微信集成、飞书机器人、搜索等。
+## What is this
 
-问题在于：OpenClaw 本身太重、太复杂、有安全隐患。生产级开发者不会跑它。
+[OpenClaw](https://github.com/openclaw/openclaw) is a popular AI assistant platform with 78 extensions and 52 skills. Major companies like Tencent, ByteDance, and Kimi are building high-quality plugins for it — WeChat integration, Feishu bots, web search, and more.
 
-**Claw2Cli** 把这些插件提取出来，以纯 CLI 命令形式暴露。底层通过 `npx` 调用，插件原生运行，无需修改。任何能调 shell 的工具 — Claude Code、Gemini CLI、Python 脚本、CI 流水线 — 都能直接使用。
+The problem: OpenClaw itself is heavy, complex, and has security concerns. Production developers won't run it.
 
-## 快速开始
+**Claw2Cli** solves this by extracting these plugins and exposing them as plain CLI commands. Your Go binary calls `npx` under the hood, so plugins run natively without modification. Any tool that can call a shell command — Claude Code, Gemini CLI, Python scripts, CI pipelines — gets instant access to these capabilities.
+
+## Quick Start
 
 ```bash
-# 安装
+# Install
 go install github.com/YangZhengCQ/Claw2cli@latest
 
-# 安装插件
+# Install a plugin
 c2c install @tencent-weixin/openclaw-weixin-cli --type connector
-# 自动执行环境预检：验证 node/npm 可用性和 shim 文件完整性
+# Pre-flight checks run automatically: verifies node/npm and shim files
 
-# 启动微信连接器（前台模式，显示二维码供扫码登录）
+# Start WeChat connector (foreground — shows QR code for login)
 c2c connect wechat
 
-# 或后台运行
+# Or run in background
 c2c connect wechat -b
 
-# 查看状态
+# Check status
 c2c status
 
-# 技能型插件示例
+# Or use a skill plugin
 c2c install @some-scope/openclaw-search
 c2c run search --query "AI news"
 ```
 
-## 前置条件
+## Prerequisites
 
-- **Go 1.22+**（仅编译需要）
-- **Node.js 18+** 和 npm（运行时 — 插件是 npm 包）
-- **[tsx](https://github.com/privatenumber/tsx)**（首次 `connect` 时自动安装 — ESM + TypeScript 插件需要）
-- **macOS** 或 **Linux**（不支持 Windows）
+- **Go 1.22+** (build only)
+- **Node.js 18+** and npm (runtime — plugins are npm packages)
+- **[tsx](https://github.com/privatenumber/tsx)** (auto-installed on first `connect` — needed for ESM + TypeScript plugins)
+- **macOS** or **Linux** (Windows is not supported)
 
-## 命令参考
+## CLI Reference
 
-| 命令 | 说明 |
-|------|------|
-| `c2c run <skill> [args]` | 运行技能插件（一次性） |
-| `c2c connect <connector>` | 启动连接器（默认前台，`-b` 后台运行） |
-| `c2c stop <connector>` | 停止运行中的连接器 |
-| `c2c attach <connector>` | 连接到运行中的连接器，查看消息流 |
-| `c2c echo <connector>` | 测试消费者，自动回复收到的消息 |
-| `c2c status` | 显示连接器运行状态 |
-| `c2c logs <connector> -f` | 跟踪连接器日志 |
-| `c2c list` | 列出已安装插件 |
-| `c2c info <plugin>` | 查看插件详情 |
-| `c2c install <package>` | 安装 OpenClaw 插件 |
-| `c2c mcp serve` | 启动 MCP 服务器（stdio 模式） |
+| Command | Description |
+|---------|-------------|
+| `c2c run <skill> [args]` | Run a skill plugin (one-shot) |
+| `c2c connect <connector>` | Start a connector (foreground by default, `-b` for background) |
+| `c2c stop <connector>` | Stop a running connector |
+| `c2c attach <connector>` | Stream messages from a running connector |
+| `c2c echo <connector>` | Test consumer that echoes back received messages |
+| `c2c status` | Show status of running connectors |
+| `c2c logs <connector> -f` | Tail connector logs |
+| `c2c list` | List installed plugins |
+| `c2c info <plugin>` | Show plugin details |
+| `c2c install <package>` | Install an OpenClaw plugin |
+| `c2c mcp serve` | Start MCP server over stdio |
 
-## 配合 Claude Code 使用（MCP）
+## Using with Claude Code (MCP)
 
-在 Claude Code MCP 设置中添加：
+Add to your Claude Code MCP settings:
 
 ```json
 {
@@ -72,95 +74,95 @@ c2c run search --query "AI news"
 }
 ```
 
-指定暴露范围：
+To expose only specific plugins:
 
 ```bash
 c2c mcp serve --skills search,translate --connectors wechat
 ```
 
-## 架构
+## Architecture
 
 ```
-用户 / Agent / 脚本
+User / Agent / Script
         |
         v
 +------------------+
-|    c2c CLI       |  <- Go 单二进制
+|    c2c CLI       |  <- Go single binary
 +------------------+
-| 命令路由器        |  <- run / connect / list / echo / mcp
+| Command Router   |  <- run / connect / list / echo / mcp
 +------+-----------+
-| 技能  | 连接器    |
-| 运行器| 管理器    |
-|(pipe)| (daemon) |
+| Skill | Connector |
+|Runner | Manager   |
+|(pipe) | (daemon)  |
 +------+-----------+
-| 插件 Shim        |  <- SKILL.md 解析 + tsx/npx 桥接
+| Plugin Shim      |  <- SKILL.md parser + tsx/npx bridge
 +------------------+
-| 权限守卫         |  <- 基于 manifest 的访问控制
+| Permission Guard |  <- manifest-based access control
 +------------------+
-| MCP 服务器       |  <- JSON-RPC over stdio
+| MCP Server       |  <- JSON-RPC over stdio
 +------------------+
         |
         v
-  OpenClaw 插件（npm 包，原生运行）
+  OpenClaw plugins (npm packages, run natively)
 ```
 
-## 插件模型
+## Plugin Model
 
-**技能型 (Skill)：** 无状态，一次性工具（搜索、翻译、代码分析）。以子进程运行，返回结果后退出。权限受限于网络访问和临时文件。
+**Skills** are stateless, one-shot tools (search, translate, code analysis). They run as a subprocess, return a result, and exit. Permissions are restricted to network access and temporary files.
 
-**连接型 (Connector)：** 有状态，长连接守护进程（微信、飞书、Discord）。保持后台连接，通过 Unix Domain Socket 通信（NDJSON 协议），可访问持久存储和凭证。
+**Connectors** are stateful, long-lived daemons (WeChat, Feishu, Discord). They maintain background connections, communicate via Unix Domain Socket (NDJSON protocol), and have access to persistent storage and credentials.
 
-| | 技能 | 连接器 |
+| | Skill | Connector |
 |---|---|---|
-| 生命周期 | 调用并返回 | 后台守护进程 |
-| 状态 | 无 | 会话持久化 |
+| Lifecycle | Call and return | Background daemon |
+| State | None | Session persistence |
 | IPC | stdin/stdout pipe | Unix Domain Socket |
-| 权限 | 受限 | 受控高权限 |
+| Permissions | Restricted | Controlled elevated |
 
-## 安全性
+## Security
 
-Claw2Cli 采用分层安全策略：
+Claw2Cli takes a layered approach to security:
 
-- **包完整性：** 安装时记录 SHA-512 校验和
-- **权限清单：** 每个插件在 `manifest.yaml` 中声明能力；未授权操作在执行前被拦截
-- **存储隔离：** 每个插件有独立数据目录（`~/.c2c/storage/<name>/`），权限 0700
-- **进程隔离：** 插件以独立子进程运行（`os/exec`）
+- **Package integrity**: SHA-512 checksum recorded on install
+- **Permission manifests**: Each plugin declares capabilities in `manifest.yaml`; unauthorized actions are blocked before execution
+- **Storage isolation**: Each plugin gets its own data directory (`~/.c2c/storage/<name>/`) with 0700 permissions
+- **Process isolation**: Plugins run as separate subprocesses via `os/exec`
 
-运行时沙箱（Linux seccomp-bpf、macOS sandbox-exec）计划在后续版本实现。
+Runtime sandboxing (seccomp-bpf on Linux, sandbox-exec on macOS) is planned for a future release.
 
-## 已支持插件
+## Supported Plugins
 
-项目早期阶段，目前已测试：
+This is an early-stage project. Currently tested with:
 
-| 插件 | 类型 | 来源 |
-|------|------|------|
-| 微信 | 连接器 | `@tencent-weixin/openclaw-weixin-cli` |
+| Plugin | Type | Source |
+|--------|------|--------|
+| WeChat | Connector | `@tencent-weixin/openclaw-weixin-cli` |
 
-更多插件将随项目成熟而添加。原则上，任何 OpenClaw 兼容的 npm 包都可以安装。
+More plugins will be added as the project matures. In principle, any OpenClaw-compatible npm package can be installed.
 
-## 开发
+## Development
 
 ```bash
 git clone https://github.com/YangZhengCQ/Claw2cli.git
 cd Claw2cli
-make build    # 编译二进制
-make test     # 运行测试
-make lint     # 运行 go vet
-make install  # 安装到 $GOPATH/bin
+make build    # Build binary
+make test     # Run tests
+make lint     # Run go vet
+make install  # Install to $GOPATH/bin
 ```
 
-## 文档
+## Documentation
 
-| 文档 | 说明 |
-|------|------|
-| [设计文档](docs/DESIGN.md) | 架构设计、决策记录（英文） |
-| [工程实施](docs/IMPLEMENTATION.md) | 具体实现细节、代码结构（英文） |
-| [踩坑记录](docs/PITFALLS.md) | 开发过程中的问题和解决方案 |
+| Document | Description |
+|----------|-------------|
+| [Design](docs/DESIGN.md) | Architecture, plugin model, design decisions |
+| [Implementation](docs/IMPLEMENTATION.md) | Code structure, key functions, flows |
+| [Pitfalls](docs/PITFALLS.md) | Lessons learned during development (Chinese) |
 
-## 许可证
+## License
 
 MIT
 
-## 致谢
+## Credits
 
-由人类开发者、[Gemini](https://gemini.google.com) 和 [Claude Code](https://claude.ai/code) 三方协作开发。
+Built by a human developer, [Gemini](https://gemini.google.com), and [Claude Code](https://claude.ai/code) working together.
