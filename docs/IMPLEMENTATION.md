@@ -265,12 +265,15 @@ Connector tools (dynamic): `registerDynamicTools()` queries each running connect
 
 **Plugin compatibility matrix:**
 
-| Plugin | Tools discovered | Channel + OAPI |
-|--------|-----------------|----------------|
-| WeChat (`@tencent-weixin/openclaw-weixin-cli`) | 2 | send_text, send_media |
-| Feishu (`@larksuite/openclaw-lark`) | 27 | send_text, send_media + calendar, task, bitable, im, chat, doc, wiki, drive, search, OAuth |
-| QQ Bot (`@tencent-connect/openclaw-qqbot`) | 3 | send_text, send_media + remind |
-| DingTalk (`@dingtalk-real-ai/dingtalk-connector`) | — | Blocked by upstream dep bug (not c2c) |
+| Plugin | Tools | Type | Notes |
+|--------|-------|------|-------|
+| WeChat (`@tencent-weixin/openclaw-weixin-cli`) | 2 | Channel | send_text, send_media. Full E2E verified. |
+| Feishu (`@larksuite/openclaw-lark`) | 27 | Channel + OAPI | calendar, task, bitable, im, chat, doc, wiki, drive, search, OAuth |
+| QQ Bot (`@tencent-connect/openclaw-qqbot`) | 3 | Channel + OAPI | send_text, send_media, remind |
+| WeCom (`@wecom/wecom-openclaw-plugin`) | 3 | Channel + MCP | send_text, send_media, wecom_mcp (HTTP MCP bridge) |
+| Web Search (`@ollama/openclaw-web-search`) | 2 | Skill-only | ollama_web_search, ollama_web_fetch. No channel, stays alive for tool calls. |
+| Tavily (`openclaw-tavily`) | 5 | Skill-only | Idle without API key. Loads successfully. |
+| DingTalk (`@dingtalk-real-ai/dingtalk-connector`) | — | — | Blocked by upstream dep bug (not c2c) |
 
 ## 9. Key Functions Reference
 

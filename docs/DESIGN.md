@@ -306,7 +306,10 @@ Go Daemon (process management + UDS)
 | WeChat | `@tencent-weixin/openclaw-weixin-cli` | ESM+TS | 2 (send_text, send_media) | Full E2E verified (login, receive, send via MCP) |
 | Feishu/Lark | `@larksuite/openclaw-lark` | CJS+JS | 27 (channel + calendar/task/bitable/im/doc/wiki/drive/OAuth) | Load + discovery verified |
 | QQ Bot | `@tencent-connect/openclaw-qqbot` | ESM+JS | 3 (send_text, send_media, remind) | Load + discovery verified |
-| DingTalk | `@dingtalk-real-ai/dingtalk-connector` | ESM+TS | — | Blocked: upstream dep `@mariozechner/pi-ai` missing `./oauth` subpath export (not a c2c issue) |
+| WeCom | `@wecom/wecom-openclaw-plugin` | ESM+CJS | 3 (send_text, send_media, wecom_mcp) | Load + discovery + gateway verified |
+| Web Search | `@ollama/openclaw-web-search` | ESM+TS | 2 (web_search, web_fetch) | Skill-only plugin, load + discovery verified |
+| Tavily | `openclaw-tavily` | ESM+TS | 5 (idle without API key) | Load verified, tools registered when API key set |
+| DingTalk | `@dingtalk-real-ai/dingtalk-connector` | ESM+TS | — | Blocked: upstream dep bug (not a c2c issue) |
 
 ### 4.10 Capability Discovery
 

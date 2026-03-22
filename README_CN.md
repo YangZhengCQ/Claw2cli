@@ -188,8 +188,10 @@ Claw2Cli 采用分层安全策略：
 | 微信 | 连接器 | `@tencent-weixin/openclaw-weixin-cli` | 2 | 全链路验证（登录、收发、MCP） |
 | 飞书 | 连接器 | `@larksuite/openclaw-lark` | 27 | 加载+发现验证 |
 | QQ Bot | 连接器 | `@tencent-connect/openclaw-qqbot` | 3 | 加载+发现验证 |
+| 企业微信 | 连接器 | `@wecom/wecom-openclaw-plugin` | 3 | 加载+发现+网关验证 |
+| Web Search | 技能 | `@ollama/openclaw-web-search` | 2 | 纯技能插件，发现验证 |
 
-原则上，任何 OpenClaw 兼容的 npm 包都可以安装。插件能力在运行时自动内省，Go 二进制中无任何硬编码的插件逻辑。
+已测试 7 个插件，6 个成功加载（共 39 个工具）。原则上，任何 OpenClaw 兼容的 npm 包都可以安装——插件能力在运行时自动内省，Go 二进制中无任何硬编码的插件逻辑。
 
 ## 开发
 
