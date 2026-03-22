@@ -1,16 +1,22 @@
 # Claw2Cli (c2c)
 
+[![Go 1.22+](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://golang.org)
+[![MCP Compatible](https://img.shields.io/badge/MCP-Ready-blueviolet)](https://modelcontextprotocol.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/YangZhengCQ/Claw2cli/actions/workflows/ci.yml/badge.svg)](https://github.com/YangZhengCQ/Claw2cli/actions)
+
 [English](README.md)
 
+> Bring your own Skills, we provide the Secure Runtime.
 > 把 OpenClaw 插件变成标准 CLI 工具。无 Docker，无浏览器，只需一个二进制。
 
-## 这是什么
+## 为什么
 
-[OpenClaw](https://github.com/openclaw/openclaw) 是一个流行的 AI 助手平台，拥有 78 个扩展和 52 个技能。腾讯、字节、Kimi 等大厂正在为其发布高质量插件 — 微信集成、飞书机器人、搜索等。
+腾讯、字节、飞书等大厂正在为 [OpenClaw](https://github.com/openclaw/openclaw) 生态构建高质量 AI 插件 — 微信机器人、飞书集成、日历管理、搜索等。
 
-问题在于：OpenClaw 本身太重、太复杂、有安全隐患。生产级开发者不会跑它。
+**痛点：** OpenClaw 本身太重、太不安全、权限过度开放。生产级开发者不会跑它。但插件本身很有价值。
 
-**Claw2Cli** 把这些插件提取出来，以纯 CLI 命令形式暴露。底层通过 `npx` 调用，插件原生运行，无需修改。任何能调 shell 的工具 — Claude Code、Gemini CLI、Python 脚本、CI 流水线 — 都能直接使用。
+**方案：** Claw2Cli 把这些插件提取出来，在薄兼容层中运行。Go daemon 管理进程生命周期，Node.js shim 伪装 OpenClaw 运行时，插件以为自己在 OpenClaw 里 — 但它的 I/O、凭证和权限都被严格控制在 UDS 管道和隔离存储中。不修改任何插件代码。Go 侧零硬编码插件逻辑。
 
 ## 快速开始
 
@@ -133,25 +139,31 @@ c2c mcp serve --skills search,translate --connectors wechat
 
 ## 架构
 
+三层隔离 —— "俄罗斯套娃"模型：
+
 ```
-用户 / Agent / 脚本
-        |
-        v
-+------------------+
-|    c2c CLI       |  <- Go 单二进制
-+------------------+
-| 命令路由器        |  <- run / connect / list / echo / mcp
-+------+-----------+
-| 技能  | 连接器    |
-| 运行器| 管理器    |
-|(pipe)| (daemon) |
-+------+-----------+
-| 插件 Shim        |  <- SKILL.md 解析 + tsx/npx 桥接
-+------------------+
-| 权限守卫         |  <- 基于 manifest 的访问控制
-+------------------+
-| MCP 服务器       |  <- JSON-RPC over stdio
-+------------------+
+用户 / AI Agent (Claude Code, Gemini CLI, 脚本)
+      | (MCP 协议 / CLI 调用)
+      v
++-------------------------------------------+
+|  Go Daemon (c2c 核心)                      |
+|  进程管理、UDS 监听、NDJSON 路由、           |
+|  权限校验、能力注册、MCP 服务器              |
++-------------------------------------------+
+      | (stdin/stdout pipe)
+      v
++-------------------------------------------+
+|  Node.js Shim (c2c-shim.js)              |
+|  伪装 @openclaw/plugin-sdk，               |
+|  能力内省 -> MCP Schema 翻译，              |
+|  工具调用桥接                               |
++-------------------------------------------+
+      | (插件以为自己在 OpenClaw 里)
+      v
++-------------------------------------------+
+|  原生大厂插件 (如 openclaw-weixin)           |
+|  未修改的 npm 包，原生运行                   |
++-------------------------------------------+
         |
         v
   OpenClaw 插件（npm 包，原生运行）

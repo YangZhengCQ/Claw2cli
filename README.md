@@ -1,16 +1,22 @@
 # Claw2Cli (c2c)
 
+[![Go 1.22+](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go)](https://golang.org)
+[![MCP Compatible](https://img.shields.io/badge/MCP-Ready-blueviolet)](https://modelcontextprotocol.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/YangZhengCQ/Claw2cli/actions/workflows/ci.yml/badge.svg)](https://github.com/YangZhengCQ/Claw2cli/actions)
+
 [中文文档](README_CN.md)
 
+> Bring your own Skills, we provide the Secure Runtime.
 > Wrap OpenClaw plugins as standard CLI tools. No Docker, no browser, just a binary.
 
-## What is this
+## Why
 
-[OpenClaw](https://github.com/openclaw/openclaw) is a popular AI assistant platform with 78 extensions and 52 skills. Major companies like Tencent, ByteDance, and Kimi are building high-quality plugins for it — WeChat integration, Feishu bots, web search, and more.
+Major companies (Tencent, ByteDance, Lark) are building high-quality AI plugins for [OpenClaw](https://github.com/openclaw/openclaw) — WeChat bots, Feishu integration, calendar management, web search, and more.
 
-The problem: OpenClaw itself is heavy, complex, and has security concerns. Production developers won't run it.
+**The problem:** OpenClaw itself is heavy, insecure, and over-permissioned. Production developers won't run it. But the plugins are valuable.
 
-**Claw2Cli** solves this by extracting these plugins and exposing them as plain CLI commands. Your Go binary calls `npx` under the hood, so plugins run natively without modification. Any tool that can call a shell command — Claude Code, Gemini CLI, Python scripts, CI pipelines — gets instant access to these capabilities.
+**The solution:** Claw2Cli extracts these plugins and runs them in a thin compatibility layer. A Go daemon manages the process lifecycle, a Node.js shim impersonates the OpenClaw runtime, and the plugin thinks it's running inside OpenClaw — but its I/O, credentials, and permissions are strictly controlled through UDS pipes and isolated storage. No plugin code is modified. Zero hardcoded plugin logic in Go.
 
 ## Quick Start
 
@@ -133,28 +139,32 @@ c2c mcp serve --skills search,translate --connectors wechat
 
 ## Architecture
 
+Three-layer isolation — the "Russian doll" model:
+
 ```
-User / Agent / Script
-        |
-        v
-+------------------+
-|    c2c CLI       |  <- Go single binary
-+------------------+
-| Command Router   |  <- run / connect / list / echo / mcp
-+------+-----------+
-| Skill | Connector |
-|Runner | Manager   |
-|(pipe) | (daemon)  |
-+------+-----------+
-| Plugin Shim      |  <- SKILL.md parser + tsx/npx bridge
-+------------------+
-| Permission Guard |  <- manifest-based access control
-+------------------+
-| MCP Server       |  <- JSON-RPC over stdio
-+------------------+
-        |
-        v
-  OpenClaw plugins (npm packages, run natively)
+User / AI Agent (Claude Code, Gemini CLI, scripts)
+      | (MCP protocol / CLI invocation)
+      v
++-------------------------------------------+
+|  Go Daemon (c2c core)                     |
+|  Process management, UDS listener,        |
+|  NDJSON routing, permission guard,        |
+|  capability registry, MCP server          |
++-------------------------------------------+
+      | (stdin/stdout pipe)
+      v
++-------------------------------------------+
+|  Node.js Shim (c2c-shim.js)              |
+|  Fake @openclaw/plugin-sdk,              |
+|  capability introspection -> MCP Schema,  |
+|  tool invocation bridge                   |
++-------------------------------------------+
+      | (plugin thinks it's in OpenClaw)
+      v
++-------------------------------------------+
+|  Original plugin (e.g., openclaw-weixin)  |
+|  Unmodified npm package, runs natively    |
++-------------------------------------------+
 ```
 
 ## Plugin Model
