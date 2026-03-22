@@ -18,7 +18,7 @@
 const path = require("path");
 const fs = require("fs");
 const sdk = require("@openclaw/plugin-sdk");
-const { PluginApiShim, sendEvent, sendLog, sendMessage, getRegisteredChannel, getGlobalRuntime, setGlobalConfig } = sdk._internal;
+const { PluginApiShim, sendEvent, sendLog, sendMessage, getRegisteredChannel, getGlobalRuntime, setGlobalConfig, emitToolDiscovery } = sdk._internal;
 
 const pluginName = process.argv[2] || process.env.C2C_PLUGIN_NAME || "unknown";
 const pluginSource = process.env.C2C_PLUGIN_SOURCE || "";
@@ -99,6 +99,9 @@ async function main() {
   // Create the fake API and register
   const api = new PluginApiShim();
   plugin.register(api);
+
+  // Emit OAPI/MCP tools collected during register() (after channel discovery)
+  emitToolDiscovery();
 
   const channel = getRegisteredChannel();
   if (!channel) {

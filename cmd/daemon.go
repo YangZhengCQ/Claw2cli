@@ -208,7 +208,8 @@ func runDaemon(name string) error {
 			if msg.Type == protocol.TypeDiscovery {
 				var dp protocol.DiscoveryPayload
 				if json.Unmarshal(msg.Payload, &dp) == nil && len(dp.Tools) > 0 {
-					registry.Store(name, dp.Tools)
+					existing := registry.Get(name)
+					registry.Store(name, append(existing, dp.Tools...))
 					if isForeground {
 						fmt.Fprintf(os.Stderr, "[discovery] %d tool(s) registered\n", len(dp.Tools))
 					}
