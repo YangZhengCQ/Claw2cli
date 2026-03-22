@@ -12,7 +12,36 @@
 
 **Claw2Cli** 把这些插件提取出来，以纯 CLI 命令形式暴露。底层通过 `npx` 调用，插件原生运行，无需修改。任何能调 shell 的工具 — Claude Code、Gemini CLI、Python 脚本、CI 流水线 — 都能直接使用。
 
-**效果如何？** 安装插件、启动连接、自动发现能力：
+## 快速开始
+
+```bash
+# 安装
+go install github.com/YangZhengCQ/Claw2cli@latest
+
+# 安装插件
+c2c install @tencent-weixin/openclaw-weixin-cli --type connector
+
+# 启动微信连接器（前台模式，显示二维码供扫码登录）
+c2c connect wechat
+
+# 查看有哪些功能
+c2c call wechat --list-tools
+
+# 调用工具
+c2c call wechat wechat_send_text '{"to":"user@im.wechat","text":"hello"}'
+
+# 或后台运行
+c2c connect wechat -b
+
+# 查看状态
+c2c status
+
+# 技能型插件示例
+c2c install @some-scope/openclaw-search
+c2c run search --query "AI news"
+```
+
+**`--list-tools` 输出效果 — 能力在运行时从插件自身内省获取，零硬编码：**
 
 ```
 $ c2c call wechat --list-tools
@@ -29,32 +58,6 @@ Discovered 2 tool(s) for "wechat":
       --to — Recipient ID
       --media — Absolute local path (/tmp/photo.png) or HTTPS URL
       --text — Optional caption text
-```
-
-零硬编码的插件逻辑。能力在运行时从插件自身内省获取。
-
-## 快速开始
-
-```bash
-# 安装
-go install github.com/YangZhengCQ/Claw2cli@latest
-
-# 安装插件
-c2c install @tencent-weixin/openclaw-weixin-cli --type connector
-# 自动执行环境预检：验证 node/npm 可用性和 shim 文件完整性
-
-# 启动微信连接器（前台模式，显示二维码供扫码登录）
-c2c connect wechat
-
-# 或后台运行
-c2c connect wechat -b
-
-# 查看状态
-c2c status
-
-# 技能型插件示例
-c2c install @some-scope/openclaw-search
-c2c run search --query "AI news"
 ```
 
 ## 前置条件

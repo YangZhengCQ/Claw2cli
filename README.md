@@ -12,7 +12,36 @@ The problem: OpenClaw itself is heavy, complex, and has security concerns. Produ
 
 **Claw2Cli** solves this by extracting these plugins and exposing them as plain CLI commands. Your Go binary calls `npx` under the hood, so plugins run natively without modification. Any tool that can call a shell command — Claude Code, Gemini CLI, Python scripts, CI pipelines — gets instant access to these capabilities.
 
-**What does it look like?** Install a plugin, connect, and discover its capabilities automatically:
+## Quick Start
+
+```bash
+# Install
+go install github.com/YangZhengCQ/Claw2cli@latest
+
+# Install a plugin
+c2c install @tencent-weixin/openclaw-weixin-cli --type connector
+
+# Start WeChat connector (foreground — shows QR code for login)
+c2c connect wechat
+
+# Discover what the plugin can do
+c2c call wechat --list-tools
+
+# Invoke a tool
+c2c call wechat wechat_send_text '{"to":"user@im.wechat","text":"hello"}'
+
+# Or run in background
+c2c connect wechat -b
+
+# Check status
+c2c status
+
+# Skill plugins work too
+c2c install @some-scope/openclaw-search
+c2c run search --query "AI news"
+```
+
+**`--list-tools` output — capabilities are introspected at runtime, zero hardcoded plugin logic:**
 
 ```
 $ c2c call wechat --list-tools
@@ -29,32 +58,6 @@ Discovered 2 tool(s) for "wechat":
       --to — Recipient ID
       --media — Absolute local path (/tmp/photo.png) or HTTPS URL
       --text — Optional caption text
-```
-
-No hardcoded plugin logic. Capabilities are introspected at runtime from the plugin itself.
-
-## Quick Start
-
-```bash
-# Install
-go install github.com/YangZhengCQ/Claw2cli@latest
-
-# Install a plugin
-c2c install @tencent-weixin/openclaw-weixin-cli --type connector
-# Pre-flight checks run automatically: verifies node/npm and shim files
-
-# Start WeChat connector (foreground — shows QR code for login)
-c2c connect wechat
-
-# Or run in background
-c2c connect wechat -b
-
-# Check status
-c2c status
-
-# Or use a skill plugin
-c2c install @some-scope/openclaw-search
-c2c run search --query "AI news"
 ```
 
 ## Prerequisites
