@@ -52,12 +52,39 @@ c2c run search --query "AI news"
 | `c2c stop <connector>` | 停止运行中的连接器 |
 | `c2c attach <connector>` | 连接到运行中的连接器，查看消息流 |
 | `c2c echo <connector>` | 测试消费者，自动回复收到的消息 |
+| `c2c call <connector> <tool> [json]` | 调用已发现的工具（通用 RPC） |
+| `c2c call <connector> --list-tools` | 列出运行中连接器的可用工具 |
 | `c2c status` | 显示连接器运行状态 |
 | `c2c logs <connector> -f` | 跟踪连接器日志 |
 | `c2c list` | 列出已安装插件 |
-| `c2c info <plugin>` | 查看插件详情 |
+| `c2c info <plugin>` | 查看插件详情（运行中时显示已发现工具） |
 | `c2c install <package>` | 安装 OpenClaw 插件 |
-| `c2c mcp serve` | 启动 MCP 服务器（stdio 模式） |
+| `c2c mcp serve` | 启动 MCP 服务器（自动包含已发现工具） |
+
+## 能力发现
+
+插件暴露的能力（发送文本、发送媒体等）会被 c2c **在运行时自动发现**。Go 二进制中没有任何硬编码的插件逻辑。
+
+```bash
+# 启动连接器
+c2c connect wechat
+
+# 在另一个终端 — 查看它能做什么
+c2c call wechat --list-tools
+# 输出：
+#   wechat_send_text     Send a text message via wechat
+#     --to       Recipient ID
+#     --text     Message content (max 4000 chars)
+#
+#   wechat_send_media    Send an image or file...
+#     --to       Recipient ID
+#     --media    Absolute local path or HTTPS URL
+
+# 调用工具
+c2c call wechat wechat_send_text '{"to":"user@im.wechat","text":"hello"}'
+```
+
+同样的工具会自动通过 MCP 暴露，Claude Code 等 Agent 可以直接调用。
 
 ## 配合 Claude Code 使用（MCP）
 

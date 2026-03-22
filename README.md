@@ -52,12 +52,39 @@ c2c run search --query "AI news"
 | `c2c stop <connector>` | Stop a running connector |
 | `c2c attach <connector>` | Stream messages from a running connector |
 | `c2c echo <connector>` | Test consumer that echoes back received messages |
+| `c2c call <connector> <tool> [json]` | Invoke a discovered tool (generic RPC) |
+| `c2c call <connector> --list-tools` | List tools discovered from a running connector |
 | `c2c status` | Show status of running connectors |
 | `c2c logs <connector> -f` | Tail connector logs |
 | `c2c list` | List installed plugins |
-| `c2c info <plugin>` | Show plugin details |
+| `c2c info <plugin>` | Show plugin details (+ discovered tools if running) |
 | `c2c install <package>` | Install an OpenClaw plugin |
-| `c2c mcp serve` | Start MCP server over stdio |
+| `c2c mcp serve` | Start MCP server over stdio (includes discovered tools) |
+
+## Capability Discovery
+
+Plugins expose capabilities (send text, send media, etc.) that c2c **automatically discovers at runtime**. No hardcoded plugin logic in the Go binary.
+
+```bash
+# Start a connector
+c2c connect wechat
+
+# In another terminal — discover what it can do
+c2c call wechat --list-tools
+# Output:
+#   wechat_send_text     Send a text message via wechat
+#     --to       Recipient ID
+#     --text     Message content (max 4000 chars)
+#
+#   wechat_send_media    Send an image or file...
+#     --to       Recipient ID
+#     --media    Absolute local path or HTTPS URL
+
+# Invoke a tool
+c2c call wechat wechat_send_text '{"to":"user@im.wechat","text":"hello"}'
+```
+
+The same tools are automatically exposed via MCP, so Claude Code and other agents can use them directly.
 
 ## Using with Claude Code (MCP)
 

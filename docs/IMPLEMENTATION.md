@@ -10,9 +10,10 @@
 - [4. Connector Lifecycle](#4-connector-lifecycle)
 - [5. Shim Layer Details](#5-shim-layer-details)
 - [6. NDJSON Protocol](#6-ndjson-protocol)
-- [7. MCP Integration](#7-mcp-integration)
-- [8. Key Functions Reference](#8-key-functions-reference)
-- [9. Test Coverage](#9-test-coverage)
+- [7. Capability Discovery](#7-capability-discovery)
+- [8. MCP Integration](#8-mcp-integration)
+- [9. Key Functions Reference](#9-key-functions-reference)
+- [10. Test Coverage](#10-test-coverage)
 
 ## 1. Project Structure
 
@@ -27,10 +28,11 @@ Claw2Cli/
 │   ├── run.go                       # c2c run — skill execution
 │   ├── attach.go                    # c2c attach — UDS stream viewer
 │   ├── echo.go                      # c2c echo — test consumer (auto-reply)
+│   ├── call.go                      # c2c call — generic RPC tool invocation
 │   ├── stop.go                      # c2c stop — graceful shutdown
 │   ├── status.go                    # c2c status — connector status table
 │   ├── list.go                      # c2c list — installed plugins
-│   ├── info.go                      # c2c info — plugin details
+│   ├── info.go                      # c2c info — plugin details + discovered tools
 │   ├── logs.go                      # c2c logs — tail daemon logs
 │   └── mcp.go                       # c2c mcp serve — MCP server
 ├── internal/
@@ -42,7 +44,8 @@ Claw2Cli/
 │   │   ├── environment.go           # Environment variable builder
 │   │   └── deps.go                  # Test dependency injection
 │   ├── mcp/
-│   │   ├── server.go                # MCP Server (stdio JSON-RPC)
+│   │   ├── server.go                # MCP Server (stdio JSON-RPC) + dynamic tool registration
+│   │   ├── dynamic.go               # UDS-based tool discovery + invocation helpers
 │   │   ├── converter.go             # Manifest → MCP Tool converter
 │   │   ├── filter.go                # Plugin filter (--skills/--connectors)
 │   │   └── deps.go                  # Test dependency injection
@@ -176,12 +179,72 @@ Defined in `internal/protocol/messages.go`:
 | `response` | client → daemon → shim | Reply to a command (matched by `id`) |
 | `error` | any direction | Unrecoverable error notification |
 | `log` | shim → daemon → clients | Debug logging (filterable by level/source) |
+| `discovery` | shim → daemon (cached) → clients | Tool schema declaration (MCP Tool Schema format) |
 
 All messages carry `source` field for multi-connector routing.
 
 `command`/`response` use `id` field for request-response correlation.
 
-## 7. MCP Integration
+## 7. Capability Discovery
+
+### Data Flow
+
+```
+Plugin registers channel (outbound.sendText, outbound.sendMedia, etc.)
+    ↓
+Shim: emitDiscovery() introspects channel → builds MCP Tool Schemas
+    ↓
+Shim emits: {"type":"discovery","source":"wechat","payload":{"tools":[...],"agentHints":[...]}}
+    ↓
+Daemon: caches tools in toolRegistry (sync.Map, key=connector name)
+    ↓
+Consumers read via UDS:
+  ├─ c2c call --list-tools    → sends "list_tools" command → daemon responds from cache
+  ├─ c2c call <tool> [args]   → sends "invoke_tool" command → daemon forwards to shim
+  ├─ c2c info <plugin>        → queries list_tools if connector is running
+  └─ c2c mcp serve            → queries list_tools at startup → registers MCP tools
+```
+
+### Shim: `emitDiscovery()` (`shim/node_modules/@openclaw/plugin-sdk/index.js`)
+
+Called after `PluginApiShim.registerChannel()`. Introspects:
+- `channel.outbound.sendText` → generates `<source>_send_text` tool
+- `channel.outbound.sendMedia` → generates `<source>_send_media` tool
+- `channel.agentPrompt.messageToolHints()` → extracted as `agentHints[]` (separate from tool descriptions)
+
+Tool descriptions are concise for CLI display. Agent hints are a separate array in the discovery payload for MCP to optionally append.
+
+### Shim: `handleInvokeTool()` (bridge functions)
+
+When shim receives `{"action":"invoke_tool","payload":{"tool":"wechat_send_text","args":{...}}}`:
+1. Match tool name suffix (`_send_text`, `_send_media`)
+2. Call the corresponding plugin method (`outbound.sendText`, `outbound.sendMedia`)
+3. Encapsulate internals: context tokens, CDN upload, session guards — caller never sees these
+4. Return result as `response` or error
+
+### Daemon: `toolRegistry` (`cmd/daemon.go`)
+
+```go
+var toolRegistry sync.Map  // connector name → []protocol.ToolSchema
+
+// On "discovery" message from shim: toolRegistry.Store(name, tools)
+// On connector stop/crash: toolRegistry.Delete(name)
+// On "list_tools" from UDS client: respond from cache (no shim round-trip)
+```
+
+Exported functions: `GetDiscoveredTools(name)`, `GetAllDiscoveredTools()`
+
+### CLI: `c2c call` (`cmd/call.go`)
+
+```bash
+c2c call <connector> --list-tools              # query tool schemas
+c2c call <connector> <tool> '{"key":"value"}'   # invoke tool, wait for response
+c2c call <connector> <tool> --timeout 60        # custom timeout (default 30s)
+```
+
+Connects to UDS, sends command, waits for matching response by `id`.
+
+## 8. MCP Integration
 
 `internal/mcp/server.go` — `Serve()`:
 1. Scan installed plugins via `parser.ListPlugins()`
@@ -191,9 +254,10 @@ All messages carry `source` field for multi-connector routing.
 5. Serve over stdio (JSON-RPC)
 
 Skill tools: receive `args` string → split → pass to npx subprocess
-Connector tools: receive `action` string → dispatch to StartConnector/StopConnector/UDS forward
+Connector tools (static): receive `action` string → dispatch to StartConnector/StopConnector/UDS forward
+Connector tools (dynamic): `registerDynamicTools()` queries each running connector via UDS `list_tools`, registers discovered tools with handlers that forward `invoke_tool` via `InvokeTool()`
 
-## 8. Key Functions Reference
+## 9. Key Functions Reference
 
 | Function | File | Purpose |
 |----------|------|---------|
@@ -204,10 +268,16 @@ Connector tools: receive `action` string → dispatch to StartConnector/StopConn
 | `checkShimFiles()` | `cmd/install.go` | Pre-flight: verify shim files exist |
 | `preInstallPackage(source)` | `cmd/install.go` | npm install -g for both CLI and runtime packages |
 | `shimDir()` | `cmd/daemon.go` | Locate shim directory relative to binary |
+| `GetDiscoveredTools(name)` | `cmd/daemon.go` | Get cached tool schemas for a connector |
+| `GetAllDiscoveredTools()` | `cmd/daemon.go` | Get tools from all active connectors |
+| `DiscoverTools(name)` | `internal/mcp/dynamic.go` | Query connector via UDS for tool schemas |
+| `InvokeTool(name, tool, args)` | `internal/mcp/dynamic.go` | Send invoke_tool via UDS, wait for result |
+| `emitDiscovery()` | `shim/.../index.js` | Introspect channel → emit MCP Tool Schemas |
+| `handleInvokeTool(msg)` | `shim/.../index.js` | Dispatch invoke_tool to plugin outbound methods |
 | `BuildEnv(manifest)` | `internal/executor/environment.go` | Build env vars for plugin subprocess |
 | `CheckPermissions(manifest)` | `internal/executor/permission.go` | Pre-exec permission guard |
 
-## 9. Test Coverage
+## 10. Test Coverage
 
 As of 2026-03-23 (Phase 1):
 
