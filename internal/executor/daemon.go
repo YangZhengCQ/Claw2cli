@@ -197,18 +197,24 @@ func ListConnectors() ([]ConnectorStatus, error) {
 }
 
 // AttachConnector connects to a running connector's Unix Domain Socket.
+// It first tries the PID-based status check (background mode), then falls back
+// to directly connecting to the socket path (foreground mode has no PID file).
 func AttachConnector(name string) (net.Conn, error) {
+	// Try PID-based status check first (background daemon mode)
 	status, err := GetConnectorStatus(name)
-	if err != nil {
-		return nil, err
-	}
-	if !status.Running {
-		return nil, fmt.Errorf("connector %q is not running", name)
+	if err == nil && status.Running {
+		conn, err := netDial("unix", status.Socket)
+		if err != nil {
+			return nil, fmt.Errorf("connect to socket: %w", err)
+		}
+		return conn, nil
 	}
 
-	conn, err := netDial("unix", status.Socket)
+	// Fallback: try connecting to socket directly (foreground mode — no PID file)
+	socketPath := paths.SocketPath(name)
+	conn, err := netDial("unix", socketPath)
 	if err != nil {
-		return nil, fmt.Errorf("connect to socket: %w", err)
+		return nil, fmt.Errorf("connector %q is not running (no PID file and socket unreachable)", name)
 	}
 	return conn, nil
 }

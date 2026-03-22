@@ -30,6 +30,7 @@ func init() {
 	rootCmd.AddCommand(connectCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(attachCmd)
+	rootCmd.AddCommand(echoCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(infoCmd)
 	rootCmd.AddCommand(installCmd)
