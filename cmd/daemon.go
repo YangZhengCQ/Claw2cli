@@ -307,7 +307,7 @@ func runDaemon(name string) error {
 		// Wait up to 3 seconds for graceful exit, then force kill
 		select {
 		case <-doneCh:
-		case <-time.After(3 * time.Second):
+		case <-time.After(9 * time.Second):
 			log.Printf("shim did not exit in time, force killing")
 			pluginCmd.Process.Kill()
 			<-doneCh
