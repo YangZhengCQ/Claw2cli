@@ -57,8 +57,8 @@ func StartConnector(manifest *parser.PluginManifest) error {
 
 	// Redirect daemon stdout/stderr to log file
 	logPath := filepath.Join(paths.BaseDir(), "logs", manifest.Name+".log")
-	os.MkdirAll(filepath.Dir(logPath), 0755)
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	os.MkdirAll(filepath.Dir(logPath), 0700)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return fmt.Errorf("open log file: %w", err)
 	}

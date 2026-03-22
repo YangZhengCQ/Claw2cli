@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/user/claw2cli/internal/nodeutil"
 	"github.com/user/claw2cli/internal/parser"
 	"github.com/user/claw2cli/internal/paths"
 	"gopkg.in/yaml.v3"
@@ -154,7 +155,7 @@ func preInstallPackage(source string) error {
 	}
 
 	// Also install the runtime plugin if different (e.g. strip -cli suffix)
-	runtimePkg := resolvePluginPackage(source)
+	runtimePkg := nodeutil.ResolvePluginPackage(source)
 	stripVersion := source
 	if strings.HasPrefix(stripVersion, "@") {
 		if idx := strings.LastIndex(stripVersion, "@"); idx > 0 {

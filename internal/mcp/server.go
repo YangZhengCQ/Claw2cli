@@ -202,9 +202,10 @@ func handleConnector(manifest *parser.PluginManifest, request gomcp.CallToolRequ
 		defer conn.Close()
 
 		payloadStr := request.GetString("payload", "{}")
-		cmd := fmt.Sprintf(`{"type":"command","source":"%s","action":"%s","payload":%s,"id":"mcp-%d"}`,
-			manifest.Name, action, payloadStr, time.Now().UnixNano())
-		conn.Write([]byte(cmd + "\n"))
+		reqID := fmt.Sprintf("mcp-%d", time.Now().UnixNano())
+		msg := protocol.NewCommand(manifest.Name, action, reqID, json.RawMessage(payloadStr))
+		data, _ := json.Marshal(msg)
+		conn.Write(append(data, '\n'))
 
 		// Read one response
 		buf := make([]byte, 65536)

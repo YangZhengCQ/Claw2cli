@@ -6,6 +6,22 @@ import (
 	"testing"
 )
 
+func TestValidateName(t *testing.T) {
+	valid := []string{"wechat", "feishu", "my-plugin", "plugin_v2"}
+	for _, name := range valid {
+		if err := ValidateName(name); err != nil {
+			t.Errorf("ValidateName(%q) should pass, got: %v", name, err)
+		}
+	}
+
+	invalid := []string{"", "../evil", "../../etc", "foo/bar", "foo\\bar", ".."}
+	for _, name := range invalid {
+		if err := ValidateName(name); err == nil {
+			t.Errorf("ValidateName(%q) should fail", name)
+		}
+	}
+}
+
 func TestSetBaseDir(t *testing.T) {
 	original := baseDir
 	defer SetBaseDir(original)

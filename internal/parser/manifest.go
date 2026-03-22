@@ -27,6 +27,9 @@ func ParseManifest(path string) (*PluginManifest, error) {
 // LoadPlugin loads a plugin by name from ~/.c2c/plugins/<name>/.
 // It reads both manifest.yaml and SKILL.md (if present).
 func LoadPlugin(name string) (*PluginManifest, error) {
+	if err := paths.ValidateName(name); err != nil {
+		return nil, err
+	}
 	pluginDir := paths.PluginDir(name)
 
 	manifestPath := filepath.Join(pluginDir, "manifest.yaml")

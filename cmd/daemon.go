@@ -11,15 +11,16 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/user/claw2cli/internal/nodeutil"
 	"github.com/user/claw2cli/internal/parser"
 	"github.com/user/claw2cli/internal/paths"
 	"github.com/user/claw2cli/internal/protocol"
+	"github.com/user/claw2cli/internal/registry"
 )
 
 // daemonCmd is a hidden command used internally by StartConnector.
@@ -61,28 +62,6 @@ func shimDir() string {
 // In foreground mode, shim stderr goes directly to the terminal for QR codes etc.
 var isForeground bool
 
-// toolRegistry caches discovered tool schemas per connector.
-// Key: connector name (string), Value: []protocol.ToolSchema
-var toolRegistry sync.Map
-
-// GetDiscoveredTools returns the cached tool schemas for a connector, or nil.
-func GetDiscoveredTools(name string) []protocol.ToolSchema {
-	v, ok := toolRegistry.Load(name)
-	if !ok {
-		return nil
-	}
-	return v.([]protocol.ToolSchema)
-}
-
-// GetAllDiscoveredTools returns tools from all active connectors.
-func GetAllDiscoveredTools() []protocol.ToolSchema {
-	var all []protocol.ToolSchema
-	toolRegistry.Range(func(key, value interface{}) bool {
-		all = append(all, value.([]protocol.ToolSchema)...)
-		return true
-	})
-	return all
-}
 
 func runDaemon(name string) error {
 	manifest, err := parser.LoadPlugin(name)
@@ -101,7 +80,7 @@ func runDaemon(name string) error {
 	// 1. Our fake @openclaw/plugin-sdk (shim/node_modules)
 	// 2. Globally installed npm packages (so the actual plugin can be resolved)
 	shimNodeModules := filepath.Join(shim, "node_modules")
-	globalNodeModules := resolveGlobalNodeModules()
+	globalNodeModules := nodeutil.ResolveGlobalNodeModules()
 
 	nodePath := shimNodeModules
 	if globalNodeModules != "" {
@@ -109,11 +88,12 @@ func runDaemon(name string) error {
 	}
 
 	// Also ensure the actual plugin package is available
-	// Run npx to ensure it's cached/installed
-	ensurePluginInstalled(manifest.Source)
+	if err := nodeutil.EnsurePluginInstalled(manifest.Source); err != nil {
+		return fmt.Errorf("install plugin packages: %w", err)
+	}
 
 	// Resolve the Node.js runner: prefer tsx (for ESM + TypeScript plugins), fallback to node
-	nodeRunner := resolveNodeRunner()
+	nodeRunner := nodeutil.ResolveNodeRunner()
 
 	// Start shim as subprocess
 	pluginCmd := exec.Command(nodeRunner, shimEntry, name)
@@ -228,7 +208,7 @@ func runDaemon(name string) error {
 			if msg.Type == protocol.TypeDiscovery {
 				var dp protocol.DiscoveryPayload
 				if json.Unmarshal(msg.Payload, &dp) == nil && len(dp.Tools) > 0 {
-					toolRegistry.Store(name, dp.Tools)
+					registry.Store(name, dp.Tools)
 					if isForeground {
 						fmt.Fprintf(os.Stderr, "[discovery] %d tool(s) registered\n", len(dp.Tools))
 					}
@@ -277,7 +257,7 @@ func runDaemon(name string) error {
 					}
 					if msg.Type == protocol.TypeCommand && msg.Action == "list_tools" {
 						// Handle list_tools locally from cached registry
-						tools := GetDiscoveredTools(name)
+						tools := registry.Get(name)
 						payload, _ := json.Marshal(protocol.DiscoveryPayload{Tools: tools})
 						resp := protocol.NewResponse(name, msg.ID, payload)
 						data, _ := json.Marshal(resp)
@@ -321,7 +301,7 @@ func runDaemon(name string) error {
 	}
 
 	// Evict discovered tools on shutdown
-	toolRegistry.Delete(name)
+	registry.Delete(name)
 
 	// Close all client connections
 	clients.Range(func(key, value interface{}) bool {
@@ -335,79 +315,3 @@ func runDaemon(name string) error {
 	return nil
 }
 
-// resolveGlobalNodeModules finds the global npm node_modules directory.
-func resolveGlobalNodeModules() string {
-	out, err := exec.Command("npm", "root", "-g").Output()
-	if err != nil {
-		return ""
-	}
-	dir := string(out)
-	// Trim newline
-	if len(dir) > 0 && dir[len(dir)-1] == '\n' {
-		dir = dir[:len(dir)-1]
-	}
-	return dir
-}
-
-// resolveNodeRunner returns "tsx" if available globally, otherwise "node".
-// tsx is needed because OpenClaw plugins are ESM + TypeScript.
-func resolveNodeRunner() string {
-	// Check if tsx is installed globally
-	if _, err := exec.LookPath("tsx"); err == nil {
-		return "tsx"
-	}
-	// Try to install tsx globally
-	log.Printf("tsx not found, installing globally for TypeScript plugin support...")
-	install := exec.Command("npm", "install", "-g", "tsx")
-	install.Stdout = os.Stderr
-	install.Stderr = os.Stderr
-	if err := install.Run(); err == nil {
-		if tsxPath, err := exec.LookPath("tsx"); err == nil {
-			return tsxPath
-		}
-	}
-	log.Printf("Warning: tsx not available, falling back to node (TypeScript plugins may not load)")
-	return "node"
-}
-
-// resolvePluginPackage derives the actual plugin package name from the source.
-// CLI wrapper packages like "@tencent-weixin/openclaw-weixin-cli" need the
-// runtime package "@tencent-weixin/openclaw-weixin" to be installed instead.
-func resolvePluginPackage(source string) string {
-	pkg := source
-	// Strip version suffix: "@scope/name@version" -> "@scope/name"
-	if strings.HasPrefix(pkg, "@") {
-		if idx := strings.LastIndex(pkg, "@"); idx > 0 {
-			pkg = pkg[:idx]
-		}
-	} else if idx := strings.Index(pkg, "@"); idx > 0 {
-		pkg = pkg[:idx]
-	}
-	// Strip -cli suffix: the CLI package is just an installer,
-	// the actual plugin is the package without -cli
-	pkg = strings.TrimSuffix(pkg, "-cli")
-	return pkg
-}
-
-// ensurePluginInstalled makes sure the npm plugin package is available globally.
-// It installs both the source package (CLI wrapper) and the actual runtime plugin.
-func ensurePluginInstalled(source string) {
-	pkgs := []string{source}
-
-	// If source is a CLI wrapper (e.g. *-cli), also install the runtime plugin
-	runtimePkg := resolvePluginPackage(source)
-	if runtimePkg != "" && runtimePkg != strings.TrimSuffix(source, "@latest") {
-		pkgs = append(pkgs, runtimePkg)
-	}
-
-	for _, pkg := range pkgs {
-		cmd := exec.Command("npm", "list", "-g", pkg, "--depth=0")
-		if err := cmd.Run(); err != nil {
-			log.Printf("Installing plugin package: %s", pkg)
-			install := exec.Command("npm", "install", "-g", pkg)
-			install.Stdout = os.Stderr
-			install.Stderr = os.Stderr
-			install.Run()
-		}
-	}
-}

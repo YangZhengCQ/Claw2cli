@@ -1,8 +1,10 @@
 package paths
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // baseDir is the root of all c2c data. Override with SetBaseDir for testing.
@@ -24,6 +26,17 @@ func SetBaseDir(dir string) {
 // BaseDir returns the root c2c data directory (~/.c2c).
 func BaseDir() string {
 	return baseDir
+}
+
+// ValidateName rejects plugin names that could cause path traversal.
+func ValidateName(name string) error {
+	if name == "" {
+		return fmt.Errorf("plugin name cannot be empty")
+	}
+	if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return fmt.Errorf("invalid plugin name %q: must not contain '..', '/' or '\\'", name)
+	}
+	return nil
 }
 
 // PluginsDir returns ~/.c2c/plugins.
@@ -66,7 +79,7 @@ func EnsureDirs() error {
 		filepath.Join(baseDir, "pids"),
 	}
 	for _, d := range dirs {
-		if err := os.MkdirAll(d, 0755); err != nil {
+		if err := os.MkdirAll(d, 0700); err != nil {
 			return err
 		}
 	}
