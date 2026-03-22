@@ -18,11 +18,22 @@
 
 **方案：** Claw2Cli 把这些插件提取出来，在薄兼容层中运行。Go daemon 管理进程生命周期，Node.js shim 伪装 OpenClaw 运行时，插件以为自己在 OpenClaw 里 — 但它的 I/O、凭证和权限都被严格控制在 UDS 管道和隔离存储中。不修改任何插件代码。Go 侧零硬编码插件逻辑。
 
+## 安装
+
+```bash
+# Homebrew（macOS / Linux）
+brew install YangZhengCQ/tap/c2c
+
+# 或从源码安装
+go install github.com/YangZhengCQ/Claw2cli@latest
+
+# 或直接下载二进制
+# https://github.com/YangZhengCQ/Claw2cli/releases
+```
+
 ## 快速开始
 
 ```bash
-# 安装
-go install github.com/YangZhengCQ/Claw2cli@latest
 
 # 安装插件
 c2c install @tencent-weixin/openclaw-weixin-cli --type connector

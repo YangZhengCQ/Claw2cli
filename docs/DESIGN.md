@@ -529,11 +529,12 @@ The shim's bridge functions wrap plugin internals into clean, agent-friendly ope
 - [ ] DingTalk: monitor upstream fix for `@mariozechner/pi-ai` dep
 
 ### Phase 3: Stabilization + Ecosystem
+- [x] Homebrew distribution (`brew install YangZhengCQ/tap/c2c`) + GoReleaser cross-compile (4 platforms)
 - Daemon process management improvements (auto-restart, health check)
 - TUI monitoring dashboard (bubbletea)
 - `c2c run` for skill-only plugins (currently only works via `connect` + `call`)
 - Plugin contribution guide + template
-- Homebrew / APT distribution
+- APT distribution (Linux)
 - Remove dead `internal/config` package + Viper dependency
 
 ## 7. Design Decisions

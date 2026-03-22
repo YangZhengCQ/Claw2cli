@@ -18,11 +18,22 @@ Major companies (Tencent, ByteDance, Lark) are building high-quality AI plugins 
 
 **The solution:** Claw2Cli extracts these plugins and runs them in a thin compatibility layer. A Go daemon manages the process lifecycle, a Node.js shim impersonates the OpenClaw runtime, and the plugin thinks it's running inside OpenClaw — but its I/O, credentials, and permissions are strictly controlled through UDS pipes and isolated storage. No plugin code is modified. Zero hardcoded plugin logic in Go.
 
+## Install
+
+```bash
+# Homebrew (macOS / Linux)
+brew install YangZhengCQ/tap/c2c
+
+# Or from source
+go install github.com/YangZhengCQ/Claw2cli@latest
+
+# Or download binary directly from GitHub Releases
+# https://github.com/YangZhengCQ/Claw2cli/releases
+```
+
 ## Quick Start
 
 ```bash
-# Install
-go install github.com/YangZhengCQ/Claw2cli@latest
 
 # Install a plugin
 c2c install @tencent-weixin/openclaw-weixin-cli --type connector
