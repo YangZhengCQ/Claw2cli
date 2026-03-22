@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/user/claw2cli/internal/parser"
@@ -55,6 +56,10 @@ func shimDir() string {
 	}
 	return dir
 }
+
+// isForeground is true when runDaemon is called directly from `connect` (not via _daemon).
+// In foreground mode, shim stderr goes directly to the terminal for QR codes etc.
+var isForeground bool
 
 func runDaemon(name string) error {
 	manifest, err := parser.LoadPlugin(name)
@@ -102,9 +107,15 @@ func runDaemon(name string) error {
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
-	pluginStderr, err := pluginCmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("stderr pipe: %w", err)
+	// In foreground mode, let stderr go directly to terminal (QR codes, prompts)
+	var pluginStderr io.ReadCloser
+	if isForeground {
+		pluginCmd.Stderr = os.Stderr
+	} else {
+		pluginStderr, err = pluginCmd.StderrPipe()
+		if err != nil {
+			return fmt.Errorf("stderr pipe: %w", err)
+		}
 	}
 	pluginStdin, err := pluginCmd.StdinPipe()
 	if err != nil {
@@ -153,9 +164,34 @@ func runDaemon(name string) error {
 			// Parse the NDJSON message from the shim
 			var msg protocol.Message
 			if err := json.Unmarshal(line, &msg); err != nil {
-				// Not valid NDJSON — wrap as log
+				// Not valid NDJSON — raw output (QR codes, etc.)
+				if isForeground {
+					fmt.Fprintln(os.Stderr, string(line))
+				}
 				broadcast(protocol.NewLog(name, "info", string(line)))
 				continue
+			}
+
+			// In foreground mode, print messages to terminal
+			if isForeground {
+				switch msg.Type {
+				case protocol.TypeLog:
+					fmt.Fprintf(os.Stderr, "[%s] %s\n", msg.Level, msg.MessageStr)
+				case protocol.TypeEvent:
+					if msg.Topic == "message.received" {
+						var p struct {
+							From string `json:"from"`
+							Body string `json:"body"`
+						}
+						if json.Unmarshal(msg.Payload, &p) == nil {
+							fmt.Fprintf(os.Stderr, "\n💬 %s: %s\n", p.From, p.Body)
+						}
+					} else {
+						fmt.Fprintf(os.Stderr, "[event] %s\n", msg.Topic)
+					}
+				case protocol.TypeError:
+					fmt.Fprintf(os.Stderr, "[error] %s: %s\n", msg.Code, msg.MessageStr)
+				}
 			}
 
 			// Ensure source is set
@@ -167,13 +203,16 @@ func runDaemon(name string) error {
 		}
 	}()
 
-	// Read shim stderr and broadcast as error logs
-	go func() {
-		scanner := bufio.NewScanner(pluginStderr)
-		for scanner.Scan() {
-			broadcast(protocol.NewLog(name, "error", scanner.Text()))
-		}
-	}()
+	// Read shim stderr and broadcast as error logs (background mode only;
+	// in foreground mode stderr goes directly to the terminal)
+	if pluginStderr != nil {
+		go func() {
+			scanner := bufio.NewScanner(pluginStderr)
+			for scanner.Scan() {
+				broadcast(protocol.NewLog(name, "error", scanner.Text()))
+			}
+		}()
+	}
 
 	// Accept UDS client connections
 	go func() {
@@ -224,7 +263,14 @@ func runDaemon(name string) error {
 	case sig := <-sigCh:
 		log.Printf("received signal %v, shutting down", sig)
 		pluginCmd.Process.Signal(syscall.SIGTERM)
-		<-doneCh
+		// Wait up to 3 seconds for graceful exit, then force kill
+		select {
+		case <-doneCh:
+		case <-time.After(3 * time.Second):
+			log.Printf("shim did not exit in time, force killing")
+			pluginCmd.Process.Kill()
+			<-doneCh
+		}
 	case err := <-doneCh:
 		if err != nil {
 			log.Printf("shim exited with error: %v", err)
