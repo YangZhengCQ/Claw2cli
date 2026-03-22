@@ -61,6 +61,29 @@ func shimDir() string {
 // In foreground mode, shim stderr goes directly to the terminal for QR codes etc.
 var isForeground bool
 
+// toolRegistry caches discovered tool schemas per connector.
+// Key: connector name (string), Value: []protocol.ToolSchema
+var toolRegistry sync.Map
+
+// GetDiscoveredTools returns the cached tool schemas for a connector, or nil.
+func GetDiscoveredTools(name string) []protocol.ToolSchema {
+	v, ok := toolRegistry.Load(name)
+	if !ok {
+		return nil
+	}
+	return v.([]protocol.ToolSchema)
+}
+
+// GetAllDiscoveredTools returns tools from all active connectors.
+func GetAllDiscoveredTools() []protocol.ToolSchema {
+	var all []protocol.ToolSchema
+	toolRegistry.Range(func(key, value interface{}) bool {
+		all = append(all, value.([]protocol.ToolSchema)...)
+		return true
+	})
+	return all
+}
+
 func runDaemon(name string) error {
 	manifest, err := parser.LoadPlugin(name)
 	if err != nil {
@@ -199,6 +222,17 @@ func runDaemon(name string) error {
 				msg.Source = name
 			}
 
+			// Cache discovery messages in tool registry
+			if msg.Type == protocol.TypeDiscovery {
+				var dp protocol.DiscoveryPayload
+				if json.Unmarshal(msg.Payload, &dp) == nil && len(dp.Tools) > 0 {
+					toolRegistry.Store(name, dp.Tools)
+					if isForeground {
+						fmt.Fprintf(os.Stderr, "[discovery] %d tool(s) registered\n", len(dp.Tools))
+					}
+				}
+			}
+
 			broadcast(&msg)
 		}
 	}()
@@ -239,7 +273,14 @@ func runDaemon(name string) error {
 					if err := json.Unmarshal(line, &msg); err != nil {
 						continue
 					}
-					if msg.Type == protocol.TypeCommand || msg.Type == protocol.TypeResponse {
+					if msg.Type == protocol.TypeCommand && msg.Action == "list_tools" {
+						// Handle list_tools locally from cached registry
+						tools := GetDiscoveredTools(name)
+						payload, _ := json.Marshal(protocol.DiscoveryPayload{Tools: tools})
+						resp := protocol.NewResponse(name, msg.ID, payload)
+						data, _ := json.Marshal(resp)
+						conn.Write(append(data, '\n'))
+					} else if msg.Type == protocol.TypeCommand || msg.Type == protocol.TypeResponse {
 						// Forward to shim's stdin (which routes to the plugin)
 						pluginStdin.Write(line)
 						pluginStdin.Write([]byte("\n"))
@@ -276,6 +317,9 @@ func runDaemon(name string) error {
 			log.Printf("shim exited with error: %v", err)
 		}
 	}
+
+	// Evict discovered tools on shutdown
+	toolRegistry.Delete(name)
 
 	// Close all client connections
 	clients.Range(func(key, value interface{}) bool {

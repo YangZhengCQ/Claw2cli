@@ -14,6 +14,9 @@ func TestEncoderDecoder_Roundtrip(t *testing.T) {
 		NewResponse("wechat", "req-001", json.RawMessage(`{"ok":true}`)),
 		NewError("feishu", "AUTH_FAILED", "token expired"),
 		NewLog("wechat", "info", "heartbeat ok"),
+		NewDiscovery("wechat", []ToolSchema{
+			{Name: "wechat_send_text", Description: "Send text", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		}),
 	}
 
 	var buf bytes.Buffer
@@ -122,5 +125,66 @@ func TestEncoder_MessageFields(t *testing.T) {
 	}
 	if parsed["ts"].(float64) != 1711100000 {
 		t.Errorf("ts=%v, want 1711100000", parsed["ts"])
+	}
+}
+
+func TestDiscovery_RoundTrip(t *testing.T) {
+	tools := []ToolSchema{
+		{
+			Name:        "wechat_send_text",
+			Description: "Send a text message",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"to":{"type":"string"},"text":{"type":"string"}},"required":["to","text"]}`),
+		},
+		{
+			Name:        "wechat_send_media",
+			Description: "Send media file",
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"to":{"type":"string"},"media":{"type":"string"}},"required":["to","media"]}`),
+		},
+	}
+
+	msg := NewDiscovery("wechat", tools)
+	if msg.Type != TypeDiscovery {
+		t.Errorf("type=%s, want discovery", msg.Type)
+	}
+	if msg.Source != "wechat" {
+		t.Errorf("source=%s, want wechat", msg.Source)
+	}
+
+	// Verify payload round-trips
+	var dp DiscoveryPayload
+	if err := json.Unmarshal(msg.Payload, &dp); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if len(dp.Tools) != 2 {
+		t.Fatalf("tools count=%d, want 2", len(dp.Tools))
+	}
+	if dp.Tools[0].Name != "wechat_send_text" {
+		t.Errorf("tool[0].name=%s, want wechat_send_text", dp.Tools[0].Name)
+	}
+	if dp.Tools[1].Name != "wechat_send_media" {
+		t.Errorf("tool[1].name=%s, want wechat_send_media", dp.Tools[1].Name)
+	}
+
+	// Verify JSON encode/decode roundtrip
+	var buf bytes.Buffer
+	enc := NewEncoder(&buf)
+	if err := enc.Encode(msg); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	dec := NewDecoder(&buf)
+	got, err := dec.Decode()
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Type != TypeDiscovery {
+		t.Errorf("decoded type=%s, want discovery", got.Type)
+	}
+
+	var dp2 DiscoveryPayload
+	if err := json.Unmarshal(got.Payload, &dp2); err != nil {
+		t.Fatalf("unmarshal decoded payload: %v", err)
+	}
+	if len(dp2.Tools) != 2 {
+		t.Fatalf("decoded tools count=%d, want 2", len(dp2.Tools))
 	}
 }

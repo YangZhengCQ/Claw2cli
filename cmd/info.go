@@ -1,10 +1,15 @@
 package cmd
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/user/claw2cli/internal/executor"
 	"github.com/user/claw2cli/internal/parser"
+	"github.com/user/claw2cli/internal/protocol"
 )
 
 var infoCmd = &cobra.Command{
@@ -48,6 +53,59 @@ var infoCmd = &cobra.Command{
 			fmt.Println(manifest.SkillBody)
 		}
 
+		// If connector is running, query discovered tools via UDS
+		if manifest.Type == parser.PluginTypeConnector {
+			tools := queryDiscoveredTools(name)
+			if len(tools) > 0 {
+				fmt.Printf("\nDiscovered Tools (%d):\n", len(tools))
+				for _, t := range tools {
+					fmt.Printf("  %-30s %s\n", t.Name, t.Description)
+				}
+			}
+		}
+
 		return nil
 	},
+}
+
+func queryDiscoveredTools(name string) []protocol.ToolSchema {
+	conn, err := executor.AttachConnector(name)
+	if err != nil {
+		return nil
+	}
+	defer conn.Close()
+
+	reqID := fmt.Sprintf("info-%d", time.Now().UnixNano())
+	msg := protocol.NewCommand("c2c-info", "list_tools", reqID, nil)
+	data, _ := json.Marshal(msg)
+	conn.Write(append(data, '\n'))
+
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+	deadline := time.After(3 * time.Second)
+	resultCh := make(chan []protocol.ToolSchema, 1)
+
+	go func() {
+		for scanner.Scan() {
+			var resp protocol.Message
+			if json.Unmarshal(scanner.Bytes(), &resp) != nil {
+				continue
+			}
+			if resp.ID == reqID && resp.Type == protocol.TypeResponse {
+				var dp protocol.DiscoveryPayload
+				if json.Unmarshal(resp.Payload, &dp) == nil {
+					resultCh <- dp.Tools
+				}
+				return
+			}
+		}
+	}()
+
+	select {
+	case tools := <-resultCh:
+		return tools
+	case <-deadline:
+		return nil
+	}
 }

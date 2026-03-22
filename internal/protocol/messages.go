@@ -6,11 +6,12 @@ import "encoding/json"
 type MessageType string
 
 const (
-	TypeEvent    MessageType = "event"
-	TypeCommand  MessageType = "command"
-	TypeResponse MessageType = "response"
-	TypeError    MessageType = "error"
-	TypeLog      MessageType = "log"
+	TypeEvent     MessageType = "event"
+	TypeCommand   MessageType = "command"
+	TypeResponse  MessageType = "response"
+	TypeError     MessageType = "error"
+	TypeLog       MessageType = "log"
+	TypeDiscovery MessageType = "discovery"
 )
 
 // Message is the NDJSON envelope for all c2c IPC communication.
@@ -90,5 +91,27 @@ func NewLog(source, level, message string) *Message {
 		Source:     source,
 		Level:      level,
 		MessageStr: message,
+	}
+}
+
+// ToolSchema describes a single tool in MCP Tool Schema format.
+type ToolSchema struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"inputSchema"`
+}
+
+// DiscoveryPayload is the payload of a discovery message.
+type DiscoveryPayload struct {
+	Tools []ToolSchema `json:"tools"`
+}
+
+// NewDiscovery creates a discovery message carrying tool schemas.
+func NewDiscovery(source string, tools []ToolSchema) *Message {
+	payload, _ := json.Marshal(DiscoveryPayload{Tools: tools})
+	return &Message{
+		Type:    TypeDiscovery,
+		Source:  source,
+		Payload: payload,
 	}
 }

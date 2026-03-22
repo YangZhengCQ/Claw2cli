@@ -10,6 +10,7 @@ import (
 	gomcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/user/claw2cli/internal/parser"
+	"github.com/user/claw2cli/internal/protocol"
 )
 
 // Serve starts the MCP server over stdio, exposing the given plugins as tools.
@@ -20,14 +21,73 @@ func Serve(plugins []*parser.PluginManifest) error {
 		server.WithToolCapabilities(true),
 	)
 
-	// Register each plugin as an MCP tool
+	// Register each plugin as a static MCP tool
 	for _, manifest := range plugins {
 		tool := ManifestToTool(manifest)
 		handler := makeHandler(manifest)
 		mcpServer.AddTool(tool, handler)
 	}
 
+	// Register dynamic tools from running connectors
+	registerDynamicTools(mcpServer, plugins)
+
 	return server.ServeStdio(mcpServer)
+}
+
+// registerDynamicTools queries running connectors for discovered tools and registers them.
+func registerDynamicTools(mcpServer *server.MCPServer, plugins []*parser.PluginManifest) {
+	for _, manifest := range plugins {
+		if manifest.Type != parser.PluginTypeConnector {
+			continue
+		}
+		name := manifest.Name
+
+		tools, err := DiscoverTools(name)
+		if err != nil || len(tools) == 0 {
+			continue
+		}
+
+		for _, ts := range tools {
+			tool := toolSchemaToMCPTool(ts)
+			connName := name
+			toolName := ts.Name
+			handler := func(ctx context.Context, request gomcp.CallToolRequest) (*gomcp.CallToolResult, error) {
+				// Extract all arguments as JSON
+				argsJSON, _ := json.Marshal(request.Params.Arguments)
+				result, err := InvokeTool(connName, toolName, argsJSON)
+				if err != nil {
+					return &gomcp.CallToolResult{
+						Content: []gomcp.Content{
+							gomcp.TextContent{Type: "text", Text: fmt.Sprintf("Error: %v", err)},
+						},
+						IsError: true,
+					}, nil
+				}
+				return &gomcp.CallToolResult{
+					Content: []gomcp.Content{
+						gomcp.TextContent{Type: "text", Text: string(result)},
+					},
+				}, nil
+			}
+			mcpServer.AddTool(tool, handler)
+		}
+	}
+}
+
+// toolSchemaToMCPTool converts a protocol.ToolSchema to an mcp-go Tool.
+func toolSchemaToMCPTool(ts protocol.ToolSchema) gomcp.Tool {
+	tool := gomcp.Tool{
+		Name:        ts.Name,
+		Description: ts.Description,
+	}
+	if len(ts.InputSchema) > 0 {
+		var schema gomcp.ToolInputSchema
+		if json.Unmarshal(ts.InputSchema, &schema) == nil {
+			schema.Type = "object"
+			tool.InputSchema = schema
+		}
+	}
+	return tool
 }
 
 // makeHandler creates a tool handler function for a specific plugin.
