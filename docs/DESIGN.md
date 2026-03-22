@@ -300,8 +300,13 @@ Go Daemon (process management + UDS)
 | Stub | `commands.*`, `reply.resolveHumanDelayConfig` | Return defaults |
 
 **Verified compatible plugins:**
-- `@tencent-weixin/openclaw-weixin` (WeChat)
-- `@larksuite/openclaw-lark` (Feishu) — requires 20+ utility function stubs
+
+| Plugin | Package | Format | Tools | Status |
+|--------|---------|--------|-------|--------|
+| WeChat | `@tencent-weixin/openclaw-weixin-cli` | ESM+TS | 2 (send_text, send_media) | Full E2E verified (login, receive, send via MCP) |
+| Feishu/Lark | `@larksuite/openclaw-lark` | CJS+JS | 27 (channel + calendar/task/bitable/im/doc/wiki/drive/OAuth) | Load + discovery verified |
+| QQ Bot | `@tencent-connect/openclaw-qqbot` | ESM+JS | 3 (send_text, send_media, remind) | Load + discovery verified |
+| DingTalk | `@dingtalk-real-ai/dingtalk-connector` | ESM+TS | — | Blocked: upstream dep `@mariozechner/pi-ai` missing `./oauth` subpath export (not a c2c issue) |
 
 ### 4.10 Capability Discovery
 

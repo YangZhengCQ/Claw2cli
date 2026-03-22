@@ -263,6 +263,15 @@ Connector tools (dynamic): `registerDynamicTools()` queries each running connect
 
 **Verified end-to-end:** MCP `tools/call("wechat_send_text", {to, text})` → UDS → daemon → shim bridge (auto-resolve accountId, get contextToken) → `sendMessageWeixin` → message delivered.
 
+**Plugin compatibility matrix:**
+
+| Plugin | Tools discovered | Channel + OAPI |
+|--------|-----------------|----------------|
+| WeChat (`@tencent-weixin/openclaw-weixin-cli`) | 2 | send_text, send_media |
+| Feishu (`@larksuite/openclaw-lark`) | 27 | send_text, send_media + calendar, task, bitable, im, chat, doc, wiki, drive, search, OAuth |
+| QQ Bot (`@tencent-connect/openclaw-qqbot`) | 3 | send_text, send_media + remind |
+| DingTalk (`@dingtalk-real-ai/dingtalk-connector`) | — | Blocked by upstream dep bug (not c2c) |
+
 ## 9. Key Functions Reference
 
 | Function | File | Purpose |

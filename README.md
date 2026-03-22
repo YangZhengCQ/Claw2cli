@@ -183,13 +183,13 @@ Runtime sandboxing (seccomp-bpf on Linux, sandbox-exec on macOS) is planned for 
 
 ## Supported Plugins
 
-This is an early-stage project. Currently tested with:
+| Plugin | Type | Source | Tools | Status |
+|--------|------|--------|-------|--------|
+| WeChat | Connector | `@tencent-weixin/openclaw-weixin-cli` | 2 | Full E2E (login, send/receive, MCP) |
+| Feishu/Lark | Connector | `@larksuite/openclaw-lark` | 27 | Load + discovery verified |
+| QQ Bot | Connector | `@tencent-connect/openclaw-qqbot` | 3 | Load + discovery verified |
 
-| Plugin | Type | Source |
-|--------|------|--------|
-| WeChat | Connector | `@tencent-weixin/openclaw-weixin-cli` |
-
-More plugins will be added as the project matures. In principle, any OpenClaw-compatible npm package can be installed.
+In principle, any OpenClaw-compatible npm package can be installed. Plugins are auto-introspected at runtime — no hardcoded plugin logic in the Go binary.
 
 ## Development
 

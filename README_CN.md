@@ -183,13 +183,13 @@ Claw2Cli 采用分层安全策略：
 
 ## 已支持插件
 
-项目早期阶段，目前已测试：
+| 插件 | 类型 | 来源 | 工具数 | 状态 |
+|------|------|------|--------|------|
+| 微信 | 连接器 | `@tencent-weixin/openclaw-weixin-cli` | 2 | 全链路验证（登录、收发、MCP） |
+| 飞书 | 连接器 | `@larksuite/openclaw-lark` | 27 | 加载+发现验证 |
+| QQ Bot | 连接器 | `@tencent-connect/openclaw-qqbot` | 3 | 加载+发现验证 |
 
-| 插件 | 类型 | 来源 |
-|------|------|------|
-| 微信 | 连接器 | `@tencent-weixin/openclaw-weixin-cli` |
-
-更多插件将随项目成熟而添加。原则上，任何 OpenClaw 兼容的 npm 包都可以安装。
+原则上，任何 OpenClaw 兼容的 npm 包都可以安装。插件能力在运行时自动内省，Go 二进制中无任何硬编码的插件逻辑。
 
 ## 开发
 
