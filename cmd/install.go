@@ -142,12 +142,36 @@ func checkShimFiles() error {
 	return nil
 }
 
-// preInstallPackage runs `npm install -g` to cache the plugin package ahead of time.
+// preInstallPackage runs `npm install -g` to cache both the CLI wrapper
+// and the actual runtime plugin package ahead of time.
 func preInstallPackage(source string) error {
+	// Install the source package (CLI wrapper)
 	cmd := exec.Command("npm", "install", "-g", source)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	// Also install the runtime plugin if different (e.g. strip -cli suffix)
+	runtimePkg := resolvePluginPackage(source)
+	stripVersion := source
+	if strings.HasPrefix(stripVersion, "@") {
+		if idx := strings.LastIndex(stripVersion, "@"); idx > 0 {
+			stripVersion = stripVersion[:idx]
+		}
+	}
+	if runtimePkg != "" && runtimePkg != stripVersion {
+		fmt.Printf("Pre-installing runtime package: %s\n", runtimePkg)
+		cmd2 := exec.Command("npm", "install", "-g", runtimePkg)
+		cmd2.Stdout = os.Stderr
+		cmd2.Stderr = os.Stderr
+		if err := cmd2.Run(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // derivePluginName extracts a short name from an npm package specifier.

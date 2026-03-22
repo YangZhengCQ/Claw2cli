@@ -61,11 +61,17 @@ async function main() {
   setGlobalConfig(config);
 
   // Resolve the actual plugin module
+  // OpenClaw plugins are ESM + TypeScript — use dynamic import()
   let pluginModule;
   try {
-    // Try to resolve the plugin package
     const pluginPkgName = resolvePluginPackage(pluginSource);
-    pluginModule = require(pluginPkgName);
+    try {
+      // First try dynamic import (works for ESM and with tsx loader)
+      pluginModule = await import(pluginPkgName);
+    } catch (importErr) {
+      // Fallback to require for CJS plugins
+      pluginModule = require(pluginPkgName);
+    }
   } catch (e) {
     sendLog(pluginName, "error", `Failed to load plugin: ${e.message}`);
     sendMessage({ type: "error", source: pluginName, code: "LOAD_FAILED", message: e.message });

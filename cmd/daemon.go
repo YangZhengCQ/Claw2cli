@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -83,8 +84,11 @@ func runDaemon(name string) error {
 	// Run npx to ensure it's cached/installed
 	ensurePluginInstalled(manifest.Source)
 
-	// Start Node.js shim as subprocess
-	pluginCmd := exec.Command("node", shimEntry, name)
+	// Resolve the Node.js runner: prefer tsx (for ESM + TypeScript plugins), fallback to node
+	nodeRunner := resolveNodeRunner()
+
+	// Start shim as subprocess
+	pluginCmd := exec.Command(nodeRunner, shimEntry, name)
 	pluginCmd.Env = append(os.Environ(),
 		"C2C_PLUGIN_NAME="+name,
 		"C2C_PLUGIN_TYPE="+string(manifest.Type),
@@ -253,16 +257,65 @@ func resolveGlobalNodeModules() string {
 	return dir
 }
 
+// resolveNodeRunner returns "tsx" if available globally, otherwise "node".
+// tsx is needed because OpenClaw plugins are ESM + TypeScript.
+func resolveNodeRunner() string {
+	// Check if tsx is installed globally
+	if _, err := exec.LookPath("tsx"); err == nil {
+		return "tsx"
+	}
+	// Try to install tsx globally
+	log.Printf("tsx not found, installing globally for TypeScript plugin support...")
+	install := exec.Command("npm", "install", "-g", "tsx")
+	install.Stdout = os.Stderr
+	install.Stderr = os.Stderr
+	if err := install.Run(); err == nil {
+		if tsxPath, err := exec.LookPath("tsx"); err == nil {
+			return tsxPath
+		}
+	}
+	log.Printf("Warning: tsx not available, falling back to node (TypeScript plugins may not load)")
+	return "node"
+}
+
+// resolvePluginPackage derives the actual plugin package name from the source.
+// CLI wrapper packages like "@tencent-weixin/openclaw-weixin-cli" need the
+// runtime package "@tencent-weixin/openclaw-weixin" to be installed instead.
+func resolvePluginPackage(source string) string {
+	pkg := source
+	// Strip version suffix: "@scope/name@version" -> "@scope/name"
+	if strings.HasPrefix(pkg, "@") {
+		if idx := strings.LastIndex(pkg, "@"); idx > 0 {
+			pkg = pkg[:idx]
+		}
+	} else if idx := strings.Index(pkg, "@"); idx > 0 {
+		pkg = pkg[:idx]
+	}
+	// Strip -cli suffix: the CLI package is just an installer,
+	// the actual plugin is the package without -cli
+	pkg = strings.TrimSuffix(pkg, "-cli")
+	return pkg
+}
+
 // ensurePluginInstalled makes sure the npm plugin package is available globally.
+// It installs both the source package (CLI wrapper) and the actual runtime plugin.
 func ensurePluginInstalled(source string) {
-	// Use npm list to check if installed
-	cmd := exec.Command("npm", "list", "-g", source, "--depth=0")
-	if err := cmd.Run(); err != nil {
-		// Not installed — install it
-		log.Printf("Installing plugin package: %s", source)
-		install := exec.Command("npm", "install", "-g", source)
-		install.Stdout = os.Stderr
-		install.Stderr = os.Stderr
-		install.Run()
+	pkgs := []string{source}
+
+	// If source is a CLI wrapper (e.g. *-cli), also install the runtime plugin
+	runtimePkg := resolvePluginPackage(source)
+	if runtimePkg != "" && runtimePkg != strings.TrimSuffix(source, "@latest") {
+		pkgs = append(pkgs, runtimePkg)
+	}
+
+	for _, pkg := range pkgs {
+		cmd := exec.Command("npm", "list", "-g", pkg, "--depth=0")
+		if err := cmd.Run(); err != nil {
+			log.Printf("Installing plugin package: %s", pkg)
+			install := exec.Command("npm", "install", "-g", pkg)
+			install.Stdout = os.Stderr
+			install.Stderr = os.Stderr
+			install.Run()
+		}
 	}
 }
