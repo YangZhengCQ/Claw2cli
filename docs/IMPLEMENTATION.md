@@ -43,6 +43,10 @@ Claw2Cli/
 │   │   ├── permission.go            # Permission guard (pre-exec check)
 │   │   ├── environment.go           # Environment variable builder
 │   │   └── deps.go                  # Test dependency injection
+│   ├── nodeutil/
+│   │   └── nodeutil.go              # Node.js/npm helpers (resolve runner, install packages)
+│   ├── registry/
+│   │   └── registry.go              # Tool schema cache (sync.Map, per-connector)
 │   ├── mcp/
 │   │   ├── server.go                # MCP Server (stdio JSON-RPC) + dynamic tool registration
 │   │   ├── dynamic.go               # UDS-based tool discovery + invocation helpers
@@ -69,7 +73,7 @@ Claw2Cli/
 
 ```bash
 make build          # go build -o c2c .
-make test           # go test ./...
+make test           # go test -race ./...
 make lint           # go vet ./...
 make install        # go install .
 make clean          # rm -f c2c coverage.out
@@ -263,21 +267,24 @@ Connector tools (dynamic): `registerDynamicTools()` queries each running connect
 
 | Function | File | Purpose |
 |----------|------|---------|
-| `resolvePluginPackage(source)` | `cmd/daemon.go` | Strip version + `-cli` suffix → runtime package name |
-| `resolveNodeRunner()` | `cmd/daemon.go` | Return `tsx` path (auto-install if needed), fallback `node` |
-| `ensurePluginInstalled(source)` | `cmd/daemon.go` | Install CLI + runtime packages globally |
-| `checkNodeNpm()` | `cmd/install.go` | Pre-flight: verify node/npm on PATH |
-| `checkShimFiles()` | `cmd/install.go` | Pre-flight: verify shim files exist |
-| `preInstallPackage(source)` | `cmd/install.go` | npm install -g for both CLI and runtime packages |
-| `shimDir()` | `cmd/daemon.go` | Locate shim directory relative to binary |
-| `GetDiscoveredTools(name)` | `cmd/daemon.go` | Get cached tool schemas for a connector |
-| `GetAllDiscoveredTools()` | `cmd/daemon.go` | Get tools from all active connectors |
+| `ResolvePluginPackage(source)` | `internal/nodeutil/nodeutil.go` | Strip version + `-cli` suffix → runtime package name |
+| `ResolveNodeRunner()` | `internal/nodeutil/nodeutil.go` | Return `tsx` path (auto-install if needed), fallback `node` |
+| `ResolveGlobalNodeModules()` | `internal/nodeutil/nodeutil.go` | Find global npm node_modules directory |
+| `EnsurePluginInstalled(source)` | `internal/nodeutil/nodeutil.go` | Install CLI + runtime packages globally |
+| `registry.Store(name, tools)` | `internal/registry/registry.go` | Cache tool schemas for a connector |
+| `registry.Get(name)` | `internal/registry/registry.go` | Get cached tool schemas for a connector |
+| `registry.GetAll()` | `internal/registry/registry.go` | Get tools from all active connectors |
+| `registry.Delete(name)` | `internal/registry/registry.go` | Evict tools on stop/crash |
 | `DiscoverTools(name)` | `internal/mcp/dynamic.go` | Query connector via UDS for tool schemas |
 | `InvokeTool(name, tool, args)` | `internal/mcp/dynamic.go` | Send invoke_tool via UDS, wait for result |
+| `ValidateName(name)` | `internal/paths/paths.go` | Reject path-traversal in plugin names |
+| `BuildEnv(manifest)` | `internal/executor/environment.go` | Build filtered env vars for plugin subprocess |
+| `CheckPermissions(manifest)` | `internal/executor/permission.go` | Pre-exec permission guard |
+| `checkNodeNpm()` | `cmd/install.go` | Pre-flight: verify node/npm on PATH |
+| `checkShimFiles()` | `cmd/install.go` | Pre-flight: verify shim files exist |
+| `shimDir()` | `cmd/daemon.go` | Locate shim directory relative to binary |
 | `emitDiscovery()` | `shim/.../index.js` | Introspect channel → emit MCP Tool Schemas |
 | `handleInvokeTool(msg)` | `shim/.../index.js` | Dispatch invoke_tool to plugin outbound methods |
-| `BuildEnv(manifest)` | `internal/executor/environment.go` | Build env vars for plugin subprocess |
-| `CheckPermissions(manifest)` | `internal/executor/permission.go` | Pre-exec permission guard |
 
 ## 10. Test Coverage
 
@@ -286,12 +293,13 @@ As of 2026-03-23 (Phase 1):
 | Package | Coverage |
 |---------|----------|
 | internal/config | 100.0% |
-| internal/parser | 100.0% |
-| internal/protocol | 95.5% |
-| internal/paths | 94.4% |
-| internal/executor | 90.8% |
-| internal/mcp | 85.9% |
-| **Overall internal/** | **63.1%** |
+| internal/registry | 100.0% |
+| internal/parser | 98.2% |
+| internal/protocol | 95.8% |
+| internal/paths | 95.7% |
+| internal/executor | 91.4% |
+| internal/mcp | 43.1% |
+| internal/nodeutil | 21.1% |
 
 `cmd/` and `main.go` are excluded from coverage (CLI integration layer).
 

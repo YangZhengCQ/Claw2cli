@@ -216,6 +216,9 @@ User / Agent / Script
 - **Package integrity:** SHA-512 checksum recorded on `c2c install`; runtime verification in Phase 2
 - **Declarative permissions:** c2c-owned `manifest.yaml` (doesn't modify upstream SKILL.md); checked before `os/exec`
 - **Install pre-flight:** `c2c install` validates node/npm availability and shim file integrity before proceeding
+- **Path traversal prevention:** `ValidateName()` rejects plugin names containing `..`, `/`, or `\` — blocks directory escape attacks
+- **Environment filtering:** `BuildEnv()` only passes safe env var prefixes (PATH, HOME, NODE_*, C2C_*) to plugin subprocesses — prevents credential leakage (AWS keys, GitHub tokens)
+- **File permissions:** All c2c directories created with 0700, log files with 0600 — blocks local user snooping on shared systems
 
 **Phase 2 — Runtime sandbox:**
 - macOS: `sandbox-exec` (userland, no root)
@@ -476,18 +479,27 @@ The shim's bridge functions wrap plugin internals into clean, agent-friendly ope
 
 ### Phase 1: Core Framework + WeChat MVP ✅ Complete
 
-### Phase 1.5: Capability Discovery (next)
-- Shim introspects `ChannelPlugin` after registration → translates to MCP Tool Schema → emits `discovery` message
-- New NDJSON message type: `discovery` (tools array with JSON Schema `inputSchema`)
-- Daemon caches tool schemas per connector (schema-agnostic, zero plugin-specific code)
-- Dynamic tool lifecycle: register on connect, evict on stop/crash
-- MCP `ListTools` returns live tools from all active connectors
-- MCP `CallTool` → forward as `invoke_tool` command via UDS → shim bridge → plugin method
-- New CLI command: `c2c call <connector> <tool> [json-args]` (generic RPC client)
-- Shim bridge functions encapsulate plugin internals (context tokens, CDN, session guards)
-- `c2c info <plugin>` shows discovered tool schemas
+### Phase 1.5: Capability Discovery ✅ Complete + Security Hardening
 
-### Phase 2: Plugin Expansion + Security Hardening
+**Capability Discovery:**
+- Shim schema translation → `discovery` message → daemon tool registry → MCP dynamic tools
+- `c2c call <connector> <tool> [json]` generic RPC invocation
+- `c2c call --list-tools` runtime capability introspection
+- MCP `tools/call` verified end-to-end (WeChat send_text delivered)
+
+**Security Hardening:**
+- Path traversal prevention (`ValidateName`)
+- Env var filtering (safe prefixes only)
+- Directory permissions 0700, log files 0600
+- JSON injection fix (replaced `fmt.Sprintf` with `json.Marshal`)
+- npm install error propagation
+
+**Code Quality:**
+- Extracted `internal/nodeutil/` and `internal/registry/` from `cmd/daemon.go` (-23% LOC)
+- GitHub Actions CI with `go vet`, `go test -race`, coverage, build matrix
+- `-race` flag in all test targets
+
+### Phase 2: Plugin Expansion
 - More connectors (Feishu, Discord)
 - More skills (search)
 - Runtime checksum verification
