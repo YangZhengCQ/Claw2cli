@@ -12,6 +12,27 @@ The problem: OpenClaw itself is heavy, complex, and has security concerns. Produ
 
 **Claw2Cli** solves this by extracting these plugins and exposing them as plain CLI commands. Your Go binary calls `npx` under the hood, so plugins run natively without modification. Any tool that can call a shell command — Claude Code, Gemini CLI, Python scripts, CI pipelines — gets instant access to these capabilities.
 
+**What does it look like?** Install a plugin, connect, and discover its capabilities automatically:
+
+```
+$ c2c call wechat --list-tools
+
+Discovered 2 tool(s) for "wechat":
+
+  wechat_send_text
+    Send a text message via wechat
+      --to — Recipient ID
+      --text — Message content (max 4000 chars)
+
+  wechat_send_media
+    Send an image or file. Accepts an absolute local path or an HTTPS URL.
+      --to — Recipient ID
+      --media — Absolute local path (/tmp/photo.png) or HTTPS URL
+      --text — Optional caption text
+```
+
+No hardcoded plugin logic. Capabilities are introspected at runtime from the plugin itself.
+
 ## Quick Start
 
 ```bash

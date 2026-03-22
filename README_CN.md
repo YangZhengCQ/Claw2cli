@@ -12,6 +12,27 @@
 
 **Claw2Cli** 把这些插件提取出来，以纯 CLI 命令形式暴露。底层通过 `npx` 调用，插件原生运行，无需修改。任何能调 shell 的工具 — Claude Code、Gemini CLI、Python 脚本、CI 流水线 — 都能直接使用。
 
+**效果如何？** 安装插件、启动连接、自动发现能力：
+
+```
+$ c2c call wechat --list-tools
+
+Discovered 2 tool(s) for "wechat":
+
+  wechat_send_text
+    Send a text message via wechat
+      --to — Recipient ID
+      --text — Message content (max 4000 chars)
+
+  wechat_send_media
+    Send an image or file. Accepts an absolute local path or an HTTPS URL.
+      --to — Recipient ID
+      --media — Absolute local path (/tmp/photo.png) or HTTPS URL
+      --text — Optional caption text
+```
+
+零硬编码的插件逻辑。能力在运行时从插件自身内省获取。
+
 ## 快速开始
 
 ```bash
