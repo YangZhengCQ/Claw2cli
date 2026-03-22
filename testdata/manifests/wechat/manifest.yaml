@@ -1,0 +1,7 @@
+source: "@tencent-weixin/openclaw-weixin-cli@latest"
+type: connector
+permissions:
+  - network
+  - "fs:~/.c2c/storage/wechat"
+  - "credential:keychain"
+checksum: "sha512:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
