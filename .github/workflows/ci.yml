@@ -34,7 +34,7 @@ jobs:
 
       - name: Coverage
         run: |
-          go test -coverprofile=coverage.out -covermode=atomic ./...
+          go test -coverprofile=coverage.out -covermode=atomic ./internal/...
           go tool cover -func=coverage.out | tail -1
 
       - name: Build
