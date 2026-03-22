@@ -158,7 +158,9 @@ func runDaemon(name string) error {
 		return fmt.Errorf("listen on socket: %w", err)
 	}
 	defer listener.Close()
-	defer os.Remove(socketPath)
+	// Note: do NOT defer os.Remove(socketPath) here.
+	// StopConnector.cleanupConnectorFiles handles socket cleanup.
+	// A deferred remove here would race with a newly started daemon's socket.
 
 	// Client connections
 	var clients sync.Map
