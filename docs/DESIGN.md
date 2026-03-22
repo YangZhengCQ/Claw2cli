@@ -2,6 +2,28 @@
 
 > 最后更新：2026-03-23（Phase 1 实测微信插件后同步）
 
+## 目录
+
+- [1. 项目定位](#1-项目定位)
+- [2. 上游生态：OpenClaw](#2-上游生态openclaw)
+- [3. 两类插件模型](#3-两类插件模型)
+- [4. 技术架构](#4-技术架构)
+  - [4.1 语言与技术栈](#41-语言与技术栈)
+  - [4.2 兼容层策略](#42-兼容层策略薄兼容-thin-compatibility)
+  - [4.3 JS-Go 桥接通道](#43-js-go-桥接通道)
+  - [4.4 守护进程模型](#44-连接型插件的守护进程模型)
+  - [4.5 整体架构](#45-整体架构)
+  - [4.6 安全模型](#46-安全模型分层防御)
+  - [4.7 凭证与存储隔离](#47-凭证与存储隔离)
+  - [4.8 MCP Server](#48-mcp-serverday-1-特性)
+  - [4.9 Plugin Runtime Shim](#49-plugin-runtime-shim俄罗斯套娃架构)
+- [5. 目标平台](#5-目标平台)
+- [6. MVP 范围](#6-mvp-范围)
+- [7. 开发路线图](#7-开发路线图)
+- [8. 已达成共识的决策](#8-已达成共识的决策)
+- [9. 待定决策](#9-待定决策)
+- [10. 协作模式](#10-协作模式)
+
 ## 1. 项目定位
 
 Claw2Cli 是一个 **Go 语言编写的 CLI 兼容层**，从 OpenClaw 生态中提取大厂提供的高质量插件，将其"翻译"为标准 CLI 工具。
@@ -111,7 +133,9 @@ Go 解析 SKILL.md → 构造 npx 调用命令 → 子进程执行 → 收集 st
 - **版本控制：** 从 SKILL.md 解析版本需求，动态调用 `npx @package@version`
 - **零 JS 依赖：** Go 二进制本身不需要 Node.js，插件的 Node 依赖通过 npx 按需获取
 
-**ESM + TypeScript 支持：** OpenClaw 大厂插件（微信、飞书）使用 `"type": "module"` + TypeScript 源码发布（无预编译 JS）。Claw2Cli 通过 [tsx](https://github.com/privatenumber/tsx) 替代 node 运行 shim，支持 ESM `import()` 和 TypeScript 直接加载。tsx 在首次 `c2c connect` 时自动全局安装。
+**ESM + TypeScript 支持：** OpenClaw 大厂插件（微信、飞书）使用 `"type": "module"` + TypeScript 源码发布（无预编译 JS）。Claw2Cli 通过 [tsx](https://github.com/privatenumber/tsx) 替代 node 运行 shim，支持 ESM `import()` 和 TypeScript 直接加载。`resolveNodeRunner()` 优先使用全局 tsx，若未安装则自动执行 `npm install -g tsx`，最后兜底到 node（TypeScript 插件可能无法加载）。
+
+**模块加载策略：** shim 使用 `await import()` 动态导入插件（支持 ESM），若失败则回退到 `require()`（支持 CommonJS 插件），确保两种模块格式都能兼容。
 
 **CLI 包 vs 运行时包：** 部分插件拆分为两个 npm 包——CLI 安装器（如 `@tencent-weixin/openclaw-weixin-cli`）和实际运行时（如 `@tencent-weixin/openclaw-weixin`）。`c2c install` 和 daemon 均通过 `resolvePluginPackage()` 自动识别并安装两者。
 
@@ -201,7 +225,7 @@ c2c connect wechat -b       # 后台模式：通过 Setsid 脱离终端
     └─ 日志写入 ~/.c2c/logs/wechat.log
 
 c2c list          → 扫描 PID 文件，检查进程存活
-c2c attach wechat → 连接到已有 daemon 的 UDS，流式输出 NDJSON
+c2c attach wechat → 连接到 UDS（优先通过 PID 查 socket 路径，无 PID 文件时直连 socket，兼容前台模式）
 c2c status        → 表格显示活跃连接器（名称、PID、运行时间）
 c2c logs wechat -f → tail 日志文件
 c2c stop wechat   → SIGTERM → 等待 5s → SIGKILL，清理 PID/socket/metadata 文件
@@ -361,6 +385,10 @@ Go Daemon (进程管理 + UDS 对外)
 | 最小 | `session.recordInboundSession` | 写本地 JSON |
 | 最小 | `reply.finalizeInboundContext` | 直接透传 |
 | Stub | `commands.*`, `reply.resolveHumanDelayConfig` | 返回默认值 |
+
+**可靠性处理：**
+- **EPIPE 防护：** 当 Go daemon 关闭时 stdout pipe 断开，shim 的 `sendMessage()` 捕获 `EPIPE`/`ERR_STREAM_DESTROYED` 错误后静默停止写入，避免未处理异常导致进程崩溃
+- **关闭超时：** daemon 发送 SIGTERM 后等待 3 秒，超时则 SIGKILL 强杀（防止 `get_reply` 等命令阻塞导致无法退出）
 
 **已验证兼容的插件：**
 - `@tencent-weixin/openclaw-weixin`（微信）— `require("openclaw/plugin-sdk")`

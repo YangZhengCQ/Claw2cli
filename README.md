@@ -14,10 +14,11 @@ The problem: OpenClaw itself is heavy, complex, and has security concerns. Produ
 
 ```bash
 # Install
-go install github.com/user/claw2cli@latest
+go install github.com/YangZhengCQ/Claw2cli@latest
 
 # Install a plugin
 c2c install @tencent-weixin/openclaw-weixin-cli --type connector
+# Pre-flight checks run automatically: verifies node/npm and shim files
 
 # Start WeChat connector (foreground — shows QR code for login)
 c2c connect wechat
@@ -48,6 +49,7 @@ c2c run search --query "AI news"
 | `c2c connect <connector>` | Start a connector (foreground by default, `-b` for background) |
 | `c2c stop <connector>` | Stop a running connector |
 | `c2c attach <connector>` | Stream messages from a running connector |
+| `c2c echo <connector>` | Test consumer that echoes back received messages |
 | `c2c status` | Show status of running connectors |
 | `c2c logs <connector> -f` | Tail connector logs |
 | `c2c list` | List installed plugins |

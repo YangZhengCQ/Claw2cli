@@ -8,7 +8,7 @@ import (
 	"github.com/user/claw2cli/internal/parser"
 )
 
-var foregroundMode bool
+var backgroundMode bool
 
 var connectCmd = &cobra.Command{
 	Use:   "connect <connector>",
@@ -30,7 +30,7 @@ Use --background (-b) to run as a background daemon instead.`,
 			return fmt.Errorf("%q is a %s, not a connector — use 'c2c run' instead", name, manifest.Type)
 		}
 
-		if foregroundMode {
+		if backgroundMode {
 			// Background daemon mode
 			if err := executor.StartConnector(manifest); err != nil {
 				return err
@@ -49,5 +49,5 @@ Use --background (-b) to run as a background daemon instead.`,
 }
 
 func init() {
-	connectCmd.Flags().BoolVarP(&foregroundMode, "background", "b", false, "Run as background daemon")
+	connectCmd.Flags().BoolVarP(&backgroundMode, "background", "b", false, "Run as background daemon")
 }
