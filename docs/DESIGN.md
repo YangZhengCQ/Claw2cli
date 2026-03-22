@@ -302,7 +302,7 @@ Go Daemon (process management + UDS)
 
 ### 4.10 Capability Discovery
 
-**Problem:** Plugins expose rich capabilities (send text, send media, multi-account, slash commands, agent prompts), but c2c currently treats all connectors as opaque message pipes. CLI users, MCP agents, and scripts have no way to discover what a plugin can do or how to invoke its features.
+**Problem:** Plugins expose rich capabilities (send text, send media, multi-account, agent prompts), but c2c currently treats all connectors as opaque message pipes. Consumers (CLI, MCP agents, scripts) have no way to discover what a plugin can do or how to invoke its features.
 
 **Example — WeChat plugin capabilities (hidden today):**
 
@@ -312,76 +312,159 @@ Go Daemon (process management + UDS)
 | Send text reply | `outbound.sendText` | ❌ Only via `get_reply` response |
 | Send media (image/file) | `outbound.sendMedia` (local path + remote URL) | ❌ Not exposed |
 | Multi-account | `config.listAccountIds` / `resolveAccount` | ❌ Not exposed |
-| Slash commands | `/echo`, `/toggle-debug` | ❌ Handled inside plugin, invisible to c2c |
 | Agent prompt hints | `agentPrompt.messageToolHints` | ❌ Not exposed to MCP |
-| Chat types | `capabilities.chatTypes: ["direct"]` | ❌ Not exposed |
-| Media support | `capabilities.media: true` | ❌ Not exposed |
-| Text chunk limit | `outbound.textChunkLimit: 4000` | ❌ Not exposed |
 
-**Design: Three-layer capability surfacing**
+#### Design: Three-layer capability surfacing
 
 ```
-Layer 1: Plugin declares capabilities (already exists in plugin source code)
+Layer 1: Plugin declares capabilities (already exists in plugin source)
     │
     ▼
-Layer 2: Shim introspects and reports (new — shim → daemon at startup)
+Layer 2: Shim translates to MCP Tool Schema (new — shim does ALL translation)
     │
     ▼
-Layer 3: c2c exposes to consumers (new — CLI commands + MCP tools + UDS schema)
+Layer 3: Daemon caches & passes through (new — zero plugin-specific logic in Go)
+    │
+    ▼
+Consumers: MCP ListTools / CLI `c2c call` / UDS query
 ```
 
-**Layer 2 — Shim introspection:**
+#### Constraint 1: Schema Translation in Shim Layer
 
-After `plugin.register(api)`, the shim reads the registered channel object and emits a `capabilities.declared` event:
+> Consensus (2026-03-23, human + Gemini + Claude): All plugin-specific translation happens in the Node.js shim. Go daemon is schema-agnostic.
+
+OpenClaw plugins have proprietary formats (`agentPrompt.messageToolHints`, `ChannelPlugin` interface, `capabilities` object). None of these leak to Go.
+
+The shim translates plugin capabilities into **standard MCP Tool Schema (JSON Schema)** and emits a new `discovery` message type:
 
 ```jsonl
-{"type":"event","source":"wechat","topic":"capabilities.declared","payload":{
-  "channel": "openclaw-weixin",
-  "chatTypes": ["direct"],
-  "media": true,
-  "textChunkLimit": 4000,
-  "outbound": ["sendText", "sendMedia"],
-  "auth": ["login"],
-  "slashCommands": ["/echo", "/toggle-debug"],
-  "agentHints": [
-    "To send an image, use action='send_media' with 'media' set to a local path or URL.",
-    "..."
-  ],
-  "accounts": ["3ffc51ae8b27_im_bot"]
+{"type":"discovery","source":"wechat","payload":{
+  "tools": [
+    {
+      "name": "wechat_send_text",
+      "description": "Send a text message to a WeChat user. The recipient must be a valid WeChat ID ending in @im.wechat.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "to": {"type": "string", "description": "Recipient WeChat ID (e.g. wxid_xxx@im.wechat)"},
+          "text": {"type": "string", "description": "Message content (max 4000 chars)"}
+        },
+        "required": ["to", "text"]
+      }
+    },
+    {
+      "name": "wechat_send_media",
+      "description": "Send an image or file to a WeChat user. Accepts a local absolute path or an HTTPS URL. CDN upload is handled automatically.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "to": {"type": "string", "description": "Recipient WeChat ID"},
+          "media": {"type": "string", "description": "Absolute local path (/tmp/photo.png) or HTTPS URL"},
+          "text": {"type": "string", "description": "Optional caption text"}
+        },
+        "required": ["to", "media"]
+      }
+    }
+  ]
 }}
 ```
 
-**Layer 3 — Consumer-facing exposure:**
+Go daemon receives `discovery` → caches tools in memory → serves them via MCP `ListTools`. **Daemon contains zero plugin-specific logic.**
 
-| Consumer | How capabilities surface |
-|----------|------------------------|
-| **MCP** | Each outbound method becomes a tool: `wechat_send_text(to, text)`, `wechat_send_media(to, media_url)`. Agent hints injected into tool descriptions. |
-| **CLI** | `c2c send wechat --to <id> --text "hello"`, `c2c send wechat --to <id> --media /path/to/img.png`. `c2c info wechat` shows full capability table. |
-| **UDS clients** | Capabilities cached in daemon memory. New `capabilities.query` command returns the full schema. Scripts can query before acting. |
-| **Agent prompts** | `agentPrompt.messageToolHints` from plugin are forwarded as MCP tool descriptions, so LLMs know how to use each tool correctly. |
+#### Constraint 2: Dynamic Registration & Deregistration
 
-**Capability-driven MCP tool generation:**
+Capabilities are **stateful** — they follow the connector lifecycle:
 
-Current (static, hardcoded actions):
 ```
-wechat → 1 MCP tool with action: start | stop | status
-```
+c2c connect wechat
+    → shim starts → plugin.register() → shim emits "discovery"
+    → daemon caches tools → MCP ListTools includes wechat_send_text, wechat_send_media
 
-Target (dynamic, from capabilities):
-```
-wechat → N MCP tools:
-  - wechat_status        (action: status)
-  - wechat_send_text     (params: to, text)
-  - wechat_send_media    (params: to, media_url, text?)
-  - wechat_accounts      (action: list_accounts)
+c2c stop wechat  (or plugin crash)
+    → daemon evicts all tools with source="wechat"
+    → MCP ListTools no longer includes wechat tools
 ```
 
-**Key design principles:**
+This ensures MCP clients (Claude Code, Gemini CLI) always see an accurate, real-time view of available tools. No stale tools from crashed connectors.
 
-1. **Plugin-agnostic:** The discovery mechanism reads from the standard `ChannelPlugin` interface. Adding a new plugin (Feishu, Discord) automatically gets capability surfacing — no daemon code changes.
-2. **Lazy introspection:** Capabilities are only read after `plugin.register()` succeeds, not from static config. This captures the plugin's actual runtime state.
-3. **Agent-first:** The primary consumer of capabilities is an LLM agent (via MCP). Tool descriptions and agent hints are first-class outputs, not afterthoughts.
-4. **Graceful degradation:** If a plugin doesn't declare capabilities (older/simpler plugins), fall back to the current opaque pipe behavior.
+**Implementation in daemon:**
+```go
+// In-memory tool registry (Go side)
+var toolRegistry sync.Map  // source -> []MCPTool
+
+// On "discovery" message from shim stdout:
+toolRegistry.Store(msg.Source, msg.Payload.Tools)
+
+// On connector stop/crash:
+toolRegistry.Delete(name)
+
+// On MCP ListTools request:
+var allTools []MCPTool
+toolRegistry.Range(func(key, value interface{}) bool {
+    allTools = append(allTools, value.([]MCPTool)...)
+    return true
+})
+```
+
+#### Constraint 3: Generic CLI Invocation (`c2c call`)
+
+> Consensus (2026-03-23): No hardcoded business commands like `c2c send`. The CLI is a generic RPC client.
+
+**Format:**
+```bash
+c2c call <connector> <tool-name> [json-args]
+```
+
+**Examples:**
+```bash
+# Send a text message
+c2c call wechat wechat_send_text '{"to":"wxid_123@im.wechat","text":"hello"}'
+
+# Send an image
+c2c call wechat wechat_send_media '{"to":"wxid_123@im.wechat","media":"/tmp/photo.png"}'
+
+# List available tools for a connector
+c2c call wechat --list-tools
+```
+
+**Data flow:**
+```
+CLI → UDS (command: invoke_tool, tool: wechat_send_text, args: {...})
+  → Go Daemon → stdin NDJSON → Node.js Shim
+  → shim bridge function → plugin.outbound.sendText()
+  → result → stdout NDJSON → Daemon → UDS → CLI
+```
+
+The CLI never interprets tool semantics. It's a thin RPC shell over UDS, the same protocol MCP and `c2c echo` use.
+
+#### Constraint 4: Surface Only What Agents Need
+
+> Consensus (2026-03-23): Shim filters internal details. Agents get the simplest possible interface.
+
+**Exposed to agents (via MCP tools):**
+- `wechat_send_text` — send a text message
+- `wechat_send_media` — send an image/file (CDN upload handled internally)
+
+**Hidden from agents (encapsulated in shim bridge):**
+- `contextToken` management (automatically resolved per conversation)
+- CDN upload flow (`downloadRemoteImageToTemp` → `sendWeixinMediaFile`)
+- Multi-account routing (shim picks the active account)
+- Slash commands (`/echo`, `/toggle-debug` — internal debugging)
+- Session guard (`assertSessionActive` — handled transparently)
+- Text chunk splitting (shim splits at `textChunkLimit: 4000`)
+
+The shim's bridge functions wrap plugin internals into clean, agent-friendly operations. Agent sees: "send text to user X". Shim handles: resolve account, get context token, assert session, call API, handle CDN if media.
+
+#### Architecture Principles (Summary)
+
+| # | Principle | Enforcement |
+|---|-----------|-------------|
+| 1 | **Schema translation in shim** | Shim emits MCP Tool Schema JSON. Daemon is schema-agnostic — zero plugin-specific Go code. |
+| 2 | **Dynamic lifecycle** | Tools registered on connect, evicted on stop/crash. MCP always reflects live state. |
+| 3 | **Generic RPC CLI** | `c2c call` is a universal tool invoker. No hardcoded business commands. |
+| 4 | **Agent-facing simplicity** | Shim filters internals. Agents get minimal, high-level tools. Complexity lives in bridge functions. |
+| 5 | **Plugin-agnostic** | New plugins (Feishu, Discord) auto-surface tools. Zero daemon changes per plugin. |
+| 6 | **Graceful degradation** | Plugins without discovery support fall back to opaque pipe behavior. |
 
 ## 5. Target Platforms
 
@@ -394,12 +477,15 @@ wechat → N MCP tools:
 ### Phase 1: Core Framework + WeChat MVP ✅ Complete
 
 ### Phase 1.5: Capability Discovery (next)
-- Shim introspects `ChannelPlugin` interface after registration → emits `capabilities.declared`
-- Daemon caches capabilities per connector
-- MCP Server generates tools dynamically from capabilities (`send_text`, `send_media`, etc.)
-- CLI: `c2c send <connector> --to <id> --text/--media`
-- `c2c info <plugin>` shows full capability table
-- Agent prompt hints forwarded as MCP tool descriptions
+- Shim introspects `ChannelPlugin` after registration → translates to MCP Tool Schema → emits `discovery` message
+- New NDJSON message type: `discovery` (tools array with JSON Schema `inputSchema`)
+- Daemon caches tool schemas per connector (schema-agnostic, zero plugin-specific code)
+- Dynamic tool lifecycle: register on connect, evict on stop/crash
+- MCP `ListTools` returns live tools from all active connectors
+- MCP `CallTool` → forward as `invoke_tool` command via UDS → shim bridge → plugin method
+- New CLI command: `c2c call <connector> <tool> [json-args]` (generic RPC client)
+- Shim bridge functions encapsulate plugin internals (context tokens, CDN, session guards)
+- `c2c info <plugin>` shows discovered tool schemas
 
 ### Phase 2: Plugin Expansion + Security Hardening
 - More connectors (Feishu, Discord)
@@ -430,7 +516,10 @@ wechat → N MCP tools:
 | CLI vs runtime pkg | Auto-detect and install both | `-cli` suffix = installer wrapper, strip for runtime |
 | Security strategy | Phase 1: hash + declarative perms; Phase 2: runtime sandbox | Layered defense, don't block delivery |
 | Capability discovery | Shim introspects at runtime, not from static config | Captures actual plugin state; adding new plugins needs zero daemon changes |
-| MCP tool generation | Dynamic from capabilities, not hardcoded actions | Each plugin ability becomes a typed tool; agents get precise descriptions |
+| Schema translation | All in shim (Node.js), daemon is schema-agnostic | Go layer has zero plugin-specific logic; shim outputs standard MCP Tool Schema |
+| Tool lifecycle | Dynamic register/deregister following connector lifecycle | MCP clients always see accurate live state; no stale tools |
+| CLI tool invocation | Generic `c2c call` RPC, no hardcoded business commands | CLI is a universal RPC client; same protocol as MCP and UDS |
+| Agent surface area | Minimal high-level tools; internals hidden in shim bridge | Agents get send_text/send_media; CDN, tokens, sessions encapsulated |
 
 ## 8. Open Questions
 
