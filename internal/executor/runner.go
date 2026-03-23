@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/YangZhengCQ/Claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/store"
 )
 
 // SkillResult holds the output from running a skill plugin.
@@ -25,7 +27,7 @@ const DefaultTimeout = 30 * time.Second
 // maxOutputSize is the maximum captured output size from skill execution (10 MB).
 const maxOutputSize = 10 * 1024 * 1024
 
-// RunSkill executes a skill plugin as a subprocess via npx.
+// RunSkill executes a skill plugin as a subprocess using the local store.
 func RunSkill(ctx context.Context, manifest *parser.PluginManifest, args []string, timeout time.Duration) (*SkillResult, error) {
 	if err := CheckPermissions(manifest); err != nil {
 		return nil, fmt.Errorf("permission check: %w", err)
@@ -37,10 +39,15 @@ func RunSkill(ctx context.Context, manifest *parser.PluginManifest, args []strin
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Build the npx command
-	cmdArgs := buildNpxArgs(manifest.Source, args)
-	cmd := execCommandCtx(ctx, "npx", cmdArgs...)
-	cmd.Env = BuildEnv(manifest)
+	// Build the command using local store
+	s := store.New(manifest.Name)
+	if !s.IsInstalled() {
+		return nil, fmt.Errorf("skill %q not installed — run 'c2c install %s' first", manifest.Name, manifest.Name)
+	}
+	tsxPath := store.ResolveTsx()
+	// Execute the skill's main entry point from local node_modules
+	cmd := execCommandCtx(ctx, tsxPath, filepath.Join(s.NodeModulesPath(), ".bin", manifest.Name))
+	cmd.Env = append(BuildEnv(manifest), "NODE_PATH="+s.NodeModulesPath())
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -78,9 +85,3 @@ func RunSkill(ctx context.Context, manifest *parser.PluginManifest, args []strin
 	return result, nil
 }
 
-// buildNpxArgs constructs the arguments for npx invocation.
-func buildNpxArgs(source string, args []string) []string {
-	npxArgs := []string{"-y", source, "--"}
-	npxArgs = append(npxArgs, args...)
-	return npxArgs
-}

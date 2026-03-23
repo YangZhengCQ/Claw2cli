@@ -116,10 +116,19 @@ func makeHandler(manifest *parser.PluginManifest) server.ToolHandlerFunc {
 }
 
 func handleSkill(ctx context.Context, manifest *parser.PluginManifest, request gomcp.CallToolRequest) (*gomcp.CallToolResult, error) {
-	argsStr := request.GetString("args", "")
 	var args []string
-	if argsStr != "" {
-		args = strings.Fields(argsStr)
+	argsRaw := request.Params.Arguments["args"]
+	switch v := argsRaw.(type) {
+	case []interface{}:
+		for _, item := range v {
+			args = append(args, fmt.Sprint(item))
+		}
+	case string:
+		if v != "" {
+			if err := json.Unmarshal([]byte(v), &args); err != nil {
+				args = strings.Fields(v)
+			}
+		}
 	}
 
 	result, err := runSkillFn(ctx, manifest, args, 30*time.Second)

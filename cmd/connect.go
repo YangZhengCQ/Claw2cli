@@ -50,4 +50,5 @@ Use --background (-b) to run as a background daemon instead.`,
 
 func init() {
 	connectCmd.Flags().BoolVarP(&backgroundMode, "background", "b", false, "Run as background daemon")
+	connectCmd.Flags().BoolVar(&noSandbox, "no-sandbox", false, "Disable OS-level sandboxing")
 }

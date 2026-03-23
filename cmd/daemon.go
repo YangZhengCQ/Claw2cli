@@ -22,6 +22,8 @@ import (
 	"github.com/YangZhengCQ/Claw2cli/internal/paths"
 	"github.com/YangZhengCQ/Claw2cli/internal/protocol"
 	"github.com/YangZhengCQ/Claw2cli/internal/registry"
+	"github.com/YangZhengCQ/Claw2cli/internal/sandbox"
+	"github.com/YangZhengCQ/Claw2cli/internal/store"
 )
 
 // daemonCmd is a hidden command used internally by StartConnector.
@@ -52,6 +54,9 @@ const shimShutdownTimeout = 9 * time.Second
 // In foreground mode, shim stderr goes directly to the terminal for QR codes etc.
 var isForeground bool
 
+// noSandbox disables OS-level sandboxing when true (set via --no-sandbox flag).
+var noSandbox bool
+
 
 func runDaemon(name string) error {
 	manifest, err := parser.LoadPlugin(name)
@@ -66,24 +71,24 @@ func runDaemon(name string) error {
 		return fmt.Errorf("shim not found at %s — is c2c installed correctly?", shimEntry)
 	}
 
-	// Build NODE_PATH to include both:
-	// 1. Our fake @openclaw/plugin-sdk (shim/node_modules)
-	// 2. Globally installed npm packages (so the actual plugin can be resolved)
+	// Build NODE_PATH: fake SDK (shim) + local plugin packages
 	shimNodeModules := filepath.Join(shim, "node_modules")
+
+	// Verify local packages exist (no network calls at connect-time)
+	s := store.New(name)
+	if !s.IsInstalled() {
+		return fmt.Errorf("packages not installed for %q — run 'c2c install %s' first", name, name)
+	}
+
+	// Resolve the tsx runner
+	nodeRunner := store.ResolveTsx()
+
+	nodePath := shimNodeModules + ":" + s.NodeModulesPath()
+	// Keep global fallback for migration
 	globalNodeModules := nodeutil.ResolveGlobalNodeModules()
-
-	nodePath := shimNodeModules
 	if globalNodeModules != "" {
-		nodePath = shimNodeModules + ":" + globalNodeModules
+		nodePath += ":" + globalNodeModules
 	}
-
-	// Also ensure the actual plugin package is available
-	if err := nodeutil.EnsurePluginInstalled(manifest.Source); err != nil {
-		return fmt.Errorf("install plugin packages: %w", err)
-	}
-
-	// Resolve the Node.js runner: prefer tsx (for ESM + TypeScript plugins), fallback to node
-	nodeRunner := nodeutil.ResolveNodeRunner()
 
 	// Start shim as subprocess
 	// Use BuildEnv to filter out sensitive environment variables (AWS keys, tokens, etc.)
@@ -110,6 +115,19 @@ func runDaemon(name string) error {
 	pluginStdin, err := pluginCmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("stdin pipe: %w", err)
+	}
+
+	// Apply OS-level sandbox based on declared permissions
+	sandboxPaths := sandbox.SandboxPaths{
+		ShimDir:     shim,
+		NodeModules: s.NodeModulesPath(),
+		NodeRunner:  nodeRunner,
+		StorageDir:  paths.StorageDir(name),
+	}
+	if !noSandbox {
+		if err := sandbox.Apply(pluginCmd, manifest, sandboxPaths); err != nil {
+			log.Printf("warning: sandbox not available: %v", err)
+		}
 	}
 
 	if err := pluginCmd.Start(); err != nil {
@@ -251,6 +269,11 @@ func runDaemon(name string) error {
 	// stdinMu protects concurrent writes to pluginStdin from multiple UDS clients
 	var stdinMu sync.Mutex
 
+	// Set up shutdown signal channel (must be declared before accept loop
+	// so client handler goroutines can send shutdown signals)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+
 	// Accept UDS client connections
 	go func() {
 		defer func() {
@@ -284,6 +307,23 @@ func runDaemon(name string) error {
 					var msg protocol.Message
 					if err := json.Unmarshal(line, &msg); err != nil {
 						log.Printf("malformed message from client %d: %v", id, err)
+						continue
+					}
+					// Daemon-level commands (handled before plugin forwarding)
+					if msg.Type == protocol.TypePing {
+						resp := protocol.NewPong(name, msg.ID)
+						if data, err := json.Marshal(resp); err == nil {
+							conn.Write(append(data, '\n'))
+						}
+						continue
+					}
+					if msg.Type == protocol.TypeShutdown || (msg.Type == protocol.TypeCommand && msg.Action == "shutdown") {
+						log.Printf("shutdown requested by client %d", id)
+						// Signal the main goroutine to shut down
+						select {
+						case sigCh <- syscall.SIGTERM:
+						default:
+						}
 						continue
 					}
 					if msg.Type == protocol.TypeCommand && msg.Action == "list_tools" {
@@ -326,10 +366,6 @@ func runDaemon(name string) error {
 			}()
 		}
 	}()
-
-	// Wait for shutdown signal
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 
 	// Wait for either signal or plugin exit
 	doneCh := make(chan error, 1)

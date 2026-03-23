@@ -269,6 +269,44 @@ func TestHandleSkill_EmptyArgs(t *testing.T) {
 	}
 }
 
+func TestHandleSkill_ArrayArgs(t *testing.T) {
+	orig := runSkillFn
+	defer func() { runSkillFn = orig }()
+
+	var capturedArgs []string
+	runSkillFn = func(ctx context.Context, m *parser.PluginManifest, args []string, timeout time.Duration) (*executor.SkillResult, error) {
+		capturedArgs = args
+		return &executor.SkillResult{Stdout: "ok"}, nil
+	}
+
+	m := &parser.PluginManifest{Name: "test", Type: parser.PluginTypeSkill}
+	handleSkill(context.Background(), m, buildRequest(map[string]interface{}{
+		"args": []interface{}{"--query", "hello world"},
+	}))
+	if len(capturedArgs) != 2 || capturedArgs[0] != "--query" || capturedArgs[1] != "hello world" {
+		t.Errorf("expected [--query, hello world], got %v", capturedArgs)
+	}
+}
+
+func TestHandleSkill_JSONStringArgs(t *testing.T) {
+	orig := runSkillFn
+	defer func() { runSkillFn = orig }()
+
+	var capturedArgs []string
+	runSkillFn = func(ctx context.Context, m *parser.PluginManifest, args []string, timeout time.Duration) (*executor.SkillResult, error) {
+		capturedArgs = args
+		return &executor.SkillResult{Stdout: "ok"}, nil
+	}
+
+	m := &parser.PluginManifest{Name: "test", Type: parser.PluginTypeSkill}
+	handleSkill(context.Background(), m, buildRequest(map[string]interface{}{
+		"args": `["--query", "hello world"]`,
+	}))
+	if len(capturedArgs) != 2 || capturedArgs[0] != "--query" || capturedArgs[1] != "hello world" {
+		t.Errorf("expected [--query, hello world], got %v", capturedArgs)
+	}
+}
+
 // --- handleConnector tests ---
 
 func TestHandleConnector_Start_Success(t *testing.T) {

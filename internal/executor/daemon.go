@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 	"github.com/YangZhengCQ/Claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/protocol"
 )
 
 // ConnectorStatus represents the state of a connector daemon.
@@ -111,17 +113,85 @@ func StartConnector(manifest *parser.PluginManifest) error {
 	cmd.Process.Release()
 	logFile.Close()
 
+	// Wait for daemon to become ready
+	if err := waitForReady(manifest.Name, 10*time.Second); err != nil {
+		// Daemon started but didn't become ready — kill it
+		if pidData, e := os.ReadFile(pidPath); e == nil {
+			if pid, e := strconv.Atoi(strings.TrimSpace(string(pidData))); e == nil {
+				if p, e := os.FindProcess(pid); e == nil {
+					p.Signal(syscall.SIGKILL)
+				}
+			}
+		}
+		cleanupConnectorFiles(manifest.Name)
+		return fmt.Errorf("daemon failed to start: %w", err)
+	}
+
 	return nil
 }
 
-// StopConnector sends SIGTERM to a running connector daemon and cleans up.
+// waitForReady polls the daemon's UDS socket until it responds to a ping.
+func waitForReady(name string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	backoff := 50 * time.Millisecond
+
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("unix", paths.SocketPath(name), 2*time.Second)
+		if err != nil {
+			time.Sleep(backoff)
+			if backoff < 2*time.Second {
+				backoff *= 2
+			}
+			continue
+		}
+
+		// Send ping
+		msg := protocol.NewPing("c2c", "ready-check")
+		data, _ := json.Marshal(msg)
+		conn.Write(append(data, '\n'))
+		conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+
+		scanner := bufio.NewScanner(conn)
+		if scanner.Scan() {
+			var resp protocol.Message
+			if json.Unmarshal(scanner.Bytes(), &resp) == nil && resp.Type == protocol.TypePong {
+				conn.Close()
+				return nil
+			}
+		}
+		conn.Close()
+		time.Sleep(backoff)
+		if backoff < 2*time.Second {
+			backoff *= 2
+		}
+	}
+	return fmt.Errorf("daemon did not become ready within %s", timeout)
+}
+
+// StopConnector tries graceful shutdown via socket first, then falls back to PID-based SIGTERM.
 func StopConnector(name string) error {
+	// Try graceful shutdown via socket first (preferred)
+	socketPath := paths.SocketPath(name)
+	conn, err := net.DialTimeout("unix", socketPath, 2*time.Second)
+	if err == nil {
+		defer conn.Close()
+		msg := protocol.NewCommand("c2c", "shutdown", "stop-req", nil)
+		data, _ := json.Marshal(msg)
+		conn.Write(append(data, '\n'))
+		// Wait for socket to close (daemon exited)
+		conn.SetReadDeadline(time.Now().Add(7 * time.Second))
+		buf := make([]byte, 1)
+		conn.Read(buf) // blocks until close or deadline
+		cleanupConnectorFiles(name)
+		return nil
+	}
+
+	// Fallback: PID-based stop (stale daemon, socket already gone)
 	status, err := GetConnectorStatus(name)
 	if err != nil {
 		return fmt.Errorf("get status: %w", err)
 	}
 	if !status.Running {
-		// Clean up stale files
 		cleanupConnectorFiles(name)
 		return fmt.Errorf("connector %q is not running (stale PID file cleaned)", name)
 	}
@@ -131,7 +201,6 @@ func StopConnector(name string) error {
 		return fmt.Errorf("find process: %w", err)
 	}
 
-	// Send SIGTERM for graceful shutdown
 	if err := process.Signal(syscall.SIGTERM); err != nil {
 		return fmt.Errorf("send SIGTERM: %w", err)
 	}
@@ -145,9 +214,7 @@ func StopConnector(name string) error {
 
 	select {
 	case <-done:
-		// Process exited gracefully
 	case <-time.After(5 * time.Second):
-		// Force kill
 		process.Signal(syscall.SIGKILL)
 		<-done
 	}

@@ -15,6 +15,9 @@ const (
 	TypeError     MessageType = "error"
 	TypeLog       MessageType = "log"
 	TypeDiscovery MessageType = "discovery"
+	TypePing      MessageType = "ping"
+	TypePong      MessageType = "pong"
+	TypeShutdown  MessageType = "shutdown"
 )
 
 // Message is the NDJSON envelope for all c2c IPC communication.
@@ -126,5 +129,25 @@ func NewDiscovery(source string, tools []ToolSchema) *Message {
 		Source:  source,
 		Payload: payload,
 		Ts:      time.Now().Unix(),
+	}
+}
+
+// NewPing creates a ping message for readiness checks.
+func NewPing(source, id string) *Message {
+	return &Message{
+		Type:   TypePing,
+		Source: source,
+		ID:     id,
+		Ts:     time.Now().Unix(),
+	}
+}
+
+// NewPong creates a pong response to a ping.
+func NewPong(source, id string) *Message {
+	return &Message{
+		Type:   TypePong,
+		Source: source,
+		ID:     id,
+		Ts:     time.Now().Unix(),
 	}
 }

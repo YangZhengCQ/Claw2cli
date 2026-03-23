@@ -3,7 +3,7 @@ MODULE := github.com/YangZhengCQ/Claw2cli
 GOFLAGS := -trimpath
 COVERAGE_OUT := coverage.out
 
-.PHONY: build test test-verbose coverage coverage-html coverage-func lint clean install
+.PHONY: build test test-verbose coverage coverage-html coverage-func lint clean install shim-test
 
 build:
 	go build $(GOFLAGS) -o $(BINARY) .
@@ -23,6 +23,9 @@ coverage-html: coverage
 
 coverage-func: coverage
 	go tool cover -func=$(COVERAGE_OUT)
+
+shim-test:
+	cd shim && node --test test/*.test.js
 
 lint:
 	@which golangci-lint > /dev/null 2>&1 && golangci-lint run ./... || go vet ./...

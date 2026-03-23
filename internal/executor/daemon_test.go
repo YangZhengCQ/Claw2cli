@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -415,6 +416,41 @@ func TestAttachConnector_NoPIDFile(t *testing.T) {
 	_, err := AttachConnector("missing")
 	if err == nil {
 		t.Fatal("expected error for missing connector")
+	}
+}
+
+func TestStopConnector_ViaSocket(t *testing.T) {
+	dir := t.TempDir()
+	paths.SetBaseDir(dir)
+	paths.EnsureDirs()
+
+	// Create a real UDS listener
+	socketPath := paths.SocketPath("socket-stop")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	// Accept one connection, read shutdown, close
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		scanner := bufio.NewScanner(conn)
+		scanner.Scan() // read shutdown message
+		conn.Close()
+		listener.Close()
+	}()
+
+	err = StopConnector("socket-stop")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Socket file should be cleaned up
+	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
+		t.Error("socket file should be cleaned up")
 	}
 }
 

@@ -11,9 +11,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/YangZhengCQ/Claw2cli/internal/nodeutil"
 	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 	"github.com/YangZhengCQ/Claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/store"
 	"gopkg.in/yaml.v3"
 )
 
@@ -116,12 +116,22 @@ func installPlugin(source, pType string) error {
 		return fmt.Errorf("create storage dir: %w", err)
 	}
 
-	// For connectors, pre-install the npm package globally so `c2c connect` starts faster
-	if pType == "connector" {
-		fmt.Printf("Pre-installing npm package globally...\n")
-		if err := preInstallPackage(source); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: pre-install failed (will retry on connect): %v\n", err)
-		}
+	// Install packages locally
+	s := store.New(name)
+	resolvedVersion, integrity, err := s.Install(source)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: local install failed (will retry on connect): %v\n", err)
+	} else {
+		// Update manifest with resolved version and integrity
+		manifest.ResolvedVersion = resolvedVersion
+		manifest.Integrity = integrity
+		manifestData, _ = yaml.Marshal(manifest)
+		os.WriteFile(manifestPath, manifestData, 0600)
+	}
+
+	// Ensure tsx is available
+	if _, err := store.EnsureTsx(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not install tsx: %v\n", err)
 	}
 
 	fmt.Printf("Installed %q.\n", name)
@@ -157,43 +167,6 @@ func checkShimFiles() error {
 	if _, err := os.Stat(fakeSdk); os.IsNotExist(err) {
 		return fmt.Errorf("fake plugin-sdk not found at %s — is c2c installed correctly?", fakeSdk)
 	}
-	return nil
-}
-
-// preInstallPackage runs `npm install -g` to cache both the CLI wrapper
-// and the actual runtime plugin package ahead of time.
-func preInstallPackage(source string) error {
-	// Install the source package (CLI wrapper)
-	cmd := exec.Command("npm", "install", "-g", source)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	// Also install the runtime plugin if different (e.g. strip -cli suffix)
-	// Preserve version from original source spec
-	runtimePkg := nodeutil.ResolvePluginPackage(source)
-	sourceBase := source
-	sourceVersion := ""
-	if strings.HasPrefix(sourceBase, "@") {
-		if idx := strings.LastIndex(sourceBase, "@"); idx > 0 {
-			sourceVersion = sourceBase[idx:]
-			sourceBase = sourceBase[:idx]
-		}
-	}
-	if runtimePkg != "" && runtimePkg != sourceBase {
-		// Apply same version constraint to runtime package
-		runtimePkgVersioned := runtimePkg + sourceVersion
-		fmt.Printf("Pre-installing runtime package: %s\n", runtimePkgVersioned)
-		cmd2 := exec.Command("npm", "install", "-g", runtimePkgVersioned)
-		cmd2.Stdout = os.Stderr
-		cmd2.Stderr = os.Stderr
-		if err := cmd2.Run(); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 

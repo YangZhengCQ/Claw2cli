@@ -38,6 +38,9 @@ jobs:
       - name: Test with race detector
         run: go test -race -count=1 ./...
 
+      - name: Shim tests
+        run: cd shim && node --test test/*.test.js
+
       - name: Coverage
         run: |
           go test -coverprofile=coverage.out -covermode=atomic ./...

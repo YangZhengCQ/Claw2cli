@@ -200,6 +200,29 @@ func TestListPlugins(t *testing.T) {
 	}
 }
 
+func TestLoadPlugin_WithIntegrity(t *testing.T) {
+	dir := t.TempDir()
+	paths.SetBaseDir(dir)
+	pluginDir := filepath.Join(dir, "plugins", "test-integrity")
+	os.MkdirAll(pluginDir, 0700)
+	manifest := `source: "@test/pkg@1.0.0"
+type: skill
+integrity: "sha512:abc123"
+resolved_version: "1.0.0"
+`
+	os.WriteFile(filepath.Join(pluginDir, "manifest.yaml"), []byte(manifest), 0644)
+	m, err := LoadPlugin("test-integrity")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.Integrity != "sha512:abc123" {
+		t.Errorf("integrity=%q, want sha512:abc123", m.Integrity)
+	}
+	if m.ResolvedVersion != "1.0.0" {
+		t.Errorf("resolved_version=%q, want 1.0.0", m.ResolvedVersion)
+	}
+}
+
 func TestListPlugins_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
 	paths.SetBaseDir(dir)
