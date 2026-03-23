@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/user/claw2cli/internal/nodeutil"
 	"github.com/user/claw2cli/internal/parser"
 )
 
@@ -26,6 +27,10 @@ const DefaultTimeout = 30 * time.Second
 func RunSkill(ctx context.Context, manifest *parser.PluginManifest, args []string, timeout time.Duration) (*SkillResult, error) {
 	if err := CheckPermissions(manifest); err != nil {
 		return nil, fmt.Errorf("permission check: %w", err)
+	}
+
+	if err := nodeutil.VerifyChecksum(manifest.Source, manifest.Checksum); err != nil {
+		return nil, fmt.Errorf("checksum verification: %w", err)
 	}
 
 	if timeout == 0 {

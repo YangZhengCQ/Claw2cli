@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"crypto/sha512"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -56,7 +53,7 @@ func installPlugin(source, pType string) error {
 	fmt.Printf("Installing %q as %q (%s)...\n", source, name, pType)
 
 	// Get package info and checksum from npm
-	checksum, err := getNpmChecksum(source)
+	checksum, err := nodeutil.GetNpmChecksum(source)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not get checksum: %v\n", err)
 		checksum = ""
@@ -206,37 +203,3 @@ func derivePluginName(source string) string {
 	return s
 }
 
-// getNpmChecksum runs `npm info` to get the package's shasum.
-func getNpmChecksum(source string) (string, error) {
-	// Strip version for npm info
-	pkg := source
-	if idx := strings.LastIndex(pkg, "@"); idx > 0 {
-		pkg = pkg[:idx]
-	}
-
-	out, err := exec.Command("npm", "info", pkg, "--json").Output()
-	if err != nil {
-		return "", err
-	}
-
-	var info struct {
-		Dist struct {
-			Shasum   string `json:"shasum"`
-			Integrity string `json:"integrity"`
-		} `json:"dist"`
-	}
-	if err := json.Unmarshal(out, &info); err != nil {
-		return "", err
-	}
-
-	if info.Dist.Integrity != "" {
-		return info.Dist.Integrity, nil
-	}
-	if info.Dist.Shasum != "" {
-		return "sha1:" + info.Dist.Shasum, nil
-	}
-
-	// Fallback: compute our own hash from the npm info output
-	h := sha512.Sum512(out)
-	return "sha512:" + hex.EncodeToString(h[:]), nil
-}

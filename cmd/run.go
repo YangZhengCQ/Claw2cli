@@ -62,4 +62,5 @@ var runCmd = &cobra.Command{
 
 func init() {
 	runCmd.Flags().IntVar(&runTimeout, "timeout", 30, "Execution timeout in seconds")
+	runCmd.Flags().BoolVar(&skipVerify, "skip-verify", false, "Skip checksum verification")
 }

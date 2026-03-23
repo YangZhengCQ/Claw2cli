@@ -1,6 +1,8 @@
 package nodeutil
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestResolvePluginPackage(t *testing.T) {
 	tests := []struct {
@@ -25,4 +27,35 @@ func TestResolvePluginPackage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestVerifyChecksum_EmptyExpected(t *testing.T) {
+	// Empty expected = no verification = always pass
+	if err := VerifyChecksum("any-package", ""); err != nil {
+		t.Errorf("expected nil for empty checksum, got: %v", err)
+	}
+}
+
+func TestVerifyChecksum_Mismatch(t *testing.T) {
+	// This will fail because the expected checksum is fake
+	err := VerifyChecksum("@tencent-weixin/openclaw-weixin-cli", "sha512:fakechecksum")
+	if err == nil {
+		t.Error("expected checksum mismatch error")
+	}
+	if err != nil && !contains(err.Error(), "mismatch") {
+		t.Errorf("expected 'mismatch' in error, got: %v", err)
+	}
+}
+
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsStr(s, sub))
+}
+
+func containsStr(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

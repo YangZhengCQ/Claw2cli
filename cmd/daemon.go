@@ -65,14 +65,23 @@ func shimDir() string {
 }
 
 // isForeground is true when runDaemon is called directly from `connect` (not via _daemon).
-// In foreground mode, shim stderr goes directly to the terminal for QR codes etc.
 var isForeground bool
+
+// skipVerify disables checksum verification before plugin execution.
+var skipVerify bool
 
 
 func runDaemon(name string) error {
 	manifest, err := parser.LoadPlugin(name)
 	if err != nil {
 		return fmt.Errorf("load plugin: %w", err)
+	}
+
+	// Verify package integrity before execution
+	if !skipVerify {
+		if err := nodeutil.VerifyChecksum(manifest.Source, manifest.Checksum); err != nil {
+			return fmt.Errorf("checksum verification: %w", err)
+		}
 	}
 
 	// Resolve shim path
