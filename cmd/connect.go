@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/executor"
-	"github.com/user/claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/executor"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 )
 
 var backgroundMode bool

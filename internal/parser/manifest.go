@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/user/claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/paths"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,6 +19,21 @@ func ParseManifest(path string) (*PluginManifest, error) {
 	manifest := &PluginManifest{}
 	if err := yaml.Unmarshal(data, manifest); err != nil {
 		return nil, fmt.Errorf("unmarshal manifest: %w", err)
+	}
+
+	// Validate required fields
+	name := manifest.Name
+	if name == "" {
+		name = path
+	}
+	if manifest.Source == "" {
+		return nil, fmt.Errorf("manifest for %q: 'source' field is required", name)
+	}
+	if manifest.Type == "" {
+		return nil, fmt.Errorf("manifest for %q: 'type' field is required", name)
+	}
+	if manifest.Type != PluginTypeSkill && manifest.Type != PluginTypeConnector {
+		return nil, fmt.Errorf("manifest for %q: unknown type %q (must be 'skill' or 'connector')", name, manifest.Type)
 	}
 
 	return manifest, nil
@@ -48,6 +63,8 @@ func LoadPlugin(name string) (*PluginManifest, error) {
 		if parseErr == nil {
 			manifest.Skill = skill
 			manifest.SkillBody = body
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: could not parse SKILL.md for %q: %v\n", name, parseErr)
 		}
 	}
 

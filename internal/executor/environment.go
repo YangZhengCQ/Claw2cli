@@ -4,8 +4,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/user/claw2cli/internal/parser"
-	"github.com/user/claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/paths"
 )
 
 // safeEnvPrefixes lists environment variable prefixes that are safe to pass
@@ -44,7 +44,21 @@ func BuildEnv(manifest *parser.PluginManifest) []string {
 	return env
 }
 
+// sensitiveEnvVars are specific variables that match safe prefixes but contain credentials.
+var sensitiveEnvVars = []string{
+	"NODE_AUTH_TOKEN=",
+	"NPM_TOKEN=",
+	"NPM_CONFIG__AUTHTOKEN=",
+	"NODE_OPTIONS=",
+}
+
 func isSafeEnvVar(e string) bool {
+	// Block known-sensitive vars even if they match a safe prefix
+	for _, sv := range sensitiveEnvVars {
+		if strings.HasPrefix(e, sv) {
+			return false
+		}
+	}
 	for _, prefix := range safeEnvPrefixes {
 		if strings.HasPrefix(e, prefix) {
 			return true

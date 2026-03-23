@@ -13,9 +13,33 @@ var baseDir string
 func init() {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: $HOME not set, using current directory for c2c data\n")
 		home = "."
 	}
 	baseDir = filepath.Join(home, ".c2c")
+}
+
+// ShimDir returns the path to the shim directory bundled with the c2c binary.
+// It checks: next to binary, ../libexec/shim (Homebrew), and CWD fallback.
+func ShimDir() string {
+	self, err := os.Executable()
+	if err != nil {
+		return "shim"
+	}
+	binDir := filepath.Dir(self)
+	// Check if shim/ exists next to the binary
+	dir := filepath.Join(binDir, "shim")
+	if _, err := os.Stat(dir); err == nil {
+		return dir
+	}
+	// Homebrew: shim is in ../libexec/shim relative to bin/
+	libexecDir := filepath.Join(binDir, "..", "libexec", "shim")
+	if _, err := os.Stat(libexecDir); err == nil {
+		return libexecDir
+	}
+	// Note: CWD fallback removed for security — running from an untrusted directory
+	// could load attacker-controlled shim code. Use explicit install locations only.
+	return dir
 }
 
 // SetBaseDir overrides the base directory (for testing).

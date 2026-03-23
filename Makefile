@@ -1,5 +1,5 @@
 BINARY := c2c
-MODULE := github.com/user/claw2cli
+MODULE := github.com/YangZhengCQ/Claw2cli
 GOFLAGS := -trimpath
 COVERAGE_OUT := coverage.out
 
@@ -25,10 +25,13 @@ coverage-func: coverage
 	go tool cover -func=$(COVERAGE_OUT)
 
 lint:
-	go vet ./...
+	@which golangci-lint > /dev/null 2>&1 && golangci-lint run ./... || go vet ./...
 
 clean:
 	rm -f $(BINARY) $(COVERAGE_OUT) coverage.html
 
 install:
 	go install $(GOFLAGS) .
+	@echo "Note: You may need to copy the shim/ directory to your install location."
+	@echo "  For Homebrew installs, GoReleaser handles this automatically."
+	@echo "  For manual installs: cp -r shim/ $$(go env GOPATH)/libexec/shim/"

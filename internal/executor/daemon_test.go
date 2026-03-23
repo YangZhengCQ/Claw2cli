@@ -7,10 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/user/claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/paths"
 )
 
 func TestIsProcessRunning(t *testing.T) {
@@ -419,14 +420,5 @@ func TestAttachConnector_NoPIDFile(t *testing.T) {
 
 // contains is a helper for checking substrings in error messages.
 func contains(s, sub string) bool {
-	return len(s) >= len(sub) && containsSub(s, sub)
-}
-
-func containsSub(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(s, sub)
 }

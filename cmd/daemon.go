@@ -16,11 +16,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/nodeutil"
-	"github.com/user/claw2cli/internal/parser"
-	"github.com/user/claw2cli/internal/paths"
-	"github.com/user/claw2cli/internal/protocol"
-	"github.com/user/claw2cli/internal/registry"
+	"github.com/YangZhengCQ/Claw2cli/internal/executor"
+	"github.com/YangZhengCQ/Claw2cli/internal/nodeutil"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/protocol"
+	"github.com/YangZhengCQ/Claw2cli/internal/registry"
 )
 
 // daemonCmd is a hidden command used internally by StartConnector.
@@ -39,30 +40,13 @@ func init() {
 	rootCmd.AddCommand(daemonCmd)
 }
 
-// shimDir returns the path to the shim directory bundled with the c2c binary.
-// In development, it's relative to the source tree; in production, it's next to the binary.
+// shimDir delegates to paths.ShimDir for shim directory resolution.
 func shimDir() string {
-	self, err := os.Executable()
-	if err != nil {
-		return "shim"
-	}
-	binDir := filepath.Dir(self)
-	// Check if shim/ exists next to the binary
-	dir := filepath.Join(binDir, "shim")
-	if _, err := os.Stat(dir); err == nil {
-		return dir
-	}
-	// Homebrew: shim is in ../libexec/shim relative to bin/
-	libexecDir := filepath.Join(binDir, "..", "libexec", "shim")
-	if _, err := os.Stat(libexecDir); err == nil {
-		return libexecDir
-	}
-	// Fallback: look in the current working directory
-	if _, err := os.Stat("shim"); err == nil {
-		return "shim"
-	}
-	return dir
+	return paths.ShimDir()
 }
+
+// Shutdown timeout for the shim subprocess after SIGTERM.
+const shimShutdownTimeout = 9 * time.Second
 
 // isForeground is true when runDaemon is called directly from `connect` (not via _daemon).
 // In foreground mode, shim stderr goes directly to the terminal for QR codes etc.
@@ -102,12 +86,9 @@ func runDaemon(name string) error {
 	nodeRunner := nodeutil.ResolveNodeRunner()
 
 	// Start shim as subprocess
+	// Use BuildEnv to filter out sensitive environment variables (AWS keys, tokens, etc.)
 	pluginCmd := exec.Command(nodeRunner, shimEntry, name)
-	pluginCmd.Env = append(os.Environ(),
-		"C2C_PLUGIN_NAME="+name,
-		"C2C_PLUGIN_TYPE="+string(manifest.Type),
-		"C2C_STORAGE_DIR="+paths.StorageDir(name),
-		"C2C_BASE_DIR="+paths.BaseDir(),
+	pluginCmd.Env = append(executor.BuildEnv(manifest),
 		"C2C_PLUGIN_SOURCE="+manifest.Source,
 		"NODE_PATH="+nodePath,
 	)
@@ -144,6 +125,10 @@ func runDaemon(name string) error {
 		return fmt.Errorf("listen on socket: %w", err)
 	}
 	defer listener.Close()
+	// Restrict socket access to the current user only
+	if err := os.Chmod(socketPath, 0600); err != nil {
+		log.Printf("warning: could not set socket permissions: %v", err)
+	}
 	// Note: do NOT defer os.Remove(socketPath) here.
 	// StopConnector.cleanupConnectorFiles handles socket cleanup.
 	// A deferred remove here would race with a newly started daemon's socket.
@@ -155,18 +140,33 @@ func runDaemon(name string) error {
 	broadcast := func(msg *protocol.Message) {
 		data, err := json.Marshal(msg)
 		if err != nil {
+			log.Printf("broadcast: marshal error: %v", err)
 			return
 		}
 		data = append(data, '\n')
 		clients.Range(func(key, value interface{}) bool {
-			conn := value.(net.Conn)
-			conn.Write(data)
+			conn, ok := value.(net.Conn)
+			if !ok {
+				clients.Delete(key)
+				return true
+			}
+			conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if _, err := conn.Write(data); err != nil {
+				// Client disconnected; remove it
+				clients.Delete(key)
+				conn.Close()
+			}
 			return true
 		})
 	}
 
 	// Read shim stdout (NDJSON from plugin-sdk shim) and broadcast to UDS clients
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("panic in stdout reader: %v", r)
+			}
+		}()
 		scanner := bufio.NewScanner(pluginStdout)
 		scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1MB buffer for large messages
 		for scanner.Scan() {
@@ -224,21 +224,40 @@ func runDaemon(name string) error {
 
 			broadcast(&msg)
 		}
+		if err := scanner.Err(); err != nil {
+			log.Printf("shim stdout scanner error: %v", err)
+		}
 	}()
 
 	// Read shim stderr and broadcast as error logs (background mode only;
 	// in foreground mode stderr goes directly to the terminal)
 	if pluginStderr != nil {
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("panic in stderr reader: %v", r)
+				}
+			}()
 			scanner := bufio.NewScanner(pluginStderr)
 			for scanner.Scan() {
 				broadcast(protocol.NewLog(name, "error", scanner.Text()))
 			}
+			if err := scanner.Err(); err != nil {
+				log.Printf("shim stderr scanner error: %v", err)
+			}
 		}()
 	}
 
+	// stdinMu protects concurrent writes to pluginStdin from multiple UDS clients
+	var stdinMu sync.Mutex
+
 	// Accept UDS client connections
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("panic in accept loop: %v", r)
+			}
+		}()
 		clientID := 0
 		for {
 			conn, err := listener.Accept()
@@ -252,27 +271,56 @@ func runDaemon(name string) error {
 			// Handle incoming commands from UDS clients → forward to shim stdin
 			go func() {
 				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("panic in client handler: %v", r)
+					}
 					clients.Delete(id)
 					conn.Close()
 				}()
 				scanner := bufio.NewScanner(conn)
+				scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 				for scanner.Scan() {
 					line := scanner.Bytes()
 					var msg protocol.Message
 					if err := json.Unmarshal(line, &msg); err != nil {
+						log.Printf("malformed message from client %d: %v", id, err)
 						continue
 					}
 					if msg.Type == protocol.TypeCommand && msg.Action == "list_tools" {
 						// Handle list_tools locally from cached registry
 						tools := registry.Get(name)
-						payload, _ := json.Marshal(protocol.DiscoveryPayload{Tools: tools})
+						payload, err := json.Marshal(protocol.DiscoveryPayload{Tools: tools})
+						if err != nil {
+							log.Printf("marshal discovery payload: %v", err)
+							continue
+						}
 						resp := protocol.NewResponse(name, msg.ID, payload)
-						data, _ := json.Marshal(resp)
-						conn.Write(append(data, '\n'))
+						data, err := json.Marshal(resp)
+						if err != nil {
+							log.Printf("marshal response: %v", err)
+							continue
+						}
+						if _, err := conn.Write(append(data, '\n')); err != nil {
+							log.Printf("write to client %d: %v", id, err)
+							return
+						}
 					} else if msg.Type == protocol.TypeCommand || msg.Type == protocol.TypeResponse {
 						// Forward to shim's stdin (which routes to the plugin)
-						pluginStdin.Write(line)
-						pluginStdin.Write([]byte("\n"))
+						stdinMu.Lock()
+						_, err1 := pluginStdin.Write(line)
+						_, err2 := pluginStdin.Write([]byte("\n"))
+						stdinMu.Unlock()
+						if err1 != nil || err2 != nil {
+							log.Printf("write to shim stdin failed: %v / %v", err1, err2)
+							// Send error response back to the requesting client
+							if msg.ID != "" {
+								errResp := protocol.NewError(name, "FORWARD_FAILED", "failed to forward command to plugin")
+								errResp.ID = msg.ID
+								if errData, err := json.Marshal(errResp); err == nil {
+									conn.Write(append(errData, '\n'))
+								}
+							}
+						}
 					}
 				}
 			}()
@@ -293,17 +341,17 @@ func runDaemon(name string) error {
 	case sig := <-sigCh:
 		log.Printf("received signal %v, shutting down", sig)
 		pluginCmd.Process.Signal(syscall.SIGTERM)
-		// Wait up to 3 seconds for graceful exit, then force kill
+		// Wait for graceful exit, then force kill
 		select {
 		case <-doneCh:
-		case <-time.After(9 * time.Second):
+		case <-time.After(shimShutdownTimeout):
 			log.Printf("shim did not exit in time, force killing")
 			pluginCmd.Process.Kill()
 			<-doneCh
 		}
 	case err := <-doneCh:
 		if err != nil {
-			log.Printf("shim exited with error: %v", err)
+			return fmt.Errorf("shim exited unexpectedly: %w", err)
 		}
 	}
 
@@ -312,7 +360,9 @@ func runDaemon(name string) error {
 
 	// Close all client connections
 	clients.Range(func(key, value interface{}) bool {
-		value.(net.Conn).Close()
+		if conn, ok := value.(net.Conn); ok {
+			conn.Close()
+		}
 		return true
 	})
 
@@ -321,4 +371,3 @@ func runDaemon(name string) error {
 
 	return nil
 }
-

@@ -35,7 +35,9 @@ type Decoder struct {
 
 // NewDecoder creates a new NDJSON decoder.
 func NewDecoder(r io.Reader) *Decoder {
-	return &Decoder{scanner: bufio.NewScanner(r)}
+	s := bufio.NewScanner(r)
+	s.Buffer(make([]byte, 1024*1024), 1024*1024) // 1MB to match other scanners
+	return &Decoder{scanner: s}
 }
 
 // Decode reads the next message. Returns io.EOF when no more messages.

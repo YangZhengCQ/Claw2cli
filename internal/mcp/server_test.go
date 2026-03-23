@@ -10,8 +10,8 @@ import (
 	"time"
 
 	gomcp "github.com/mark3labs/mcp-go/mcp"
-	"github.com/user/claw2cli/internal/executor"
-	"github.com/user/claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/executor"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 )
 
 // --- ManifestToTool tests ---

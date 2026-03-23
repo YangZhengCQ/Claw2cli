@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,8 +10,8 @@ import (
 
 	gomcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"github.com/user/claw2cli/internal/parser"
-	"github.com/user/claw2cli/internal/protocol"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/protocol"
 )
 
 // Serve starts the MCP server over stdio, exposing the given plugins as tools.
@@ -53,7 +54,15 @@ func registerDynamicTools(mcpServer *server.MCPServer, plugins []*parser.PluginM
 			toolName := ts.Name
 			handler := func(ctx context.Context, request gomcp.CallToolRequest) (*gomcp.CallToolResult, error) {
 				// Extract all arguments as JSON
-				argsJSON, _ := json.Marshal(request.Params.Arguments)
+				argsJSON, err := json.Marshal(request.Params.Arguments)
+				if err != nil {
+					return &gomcp.CallToolResult{
+						Content: []gomcp.Content{
+							gomcp.TextContent{Type: "text", Text: fmt.Sprintf("Error marshaling args: %v", err)},
+						},
+						IsError: true,
+					}, nil
+				}
 				result, err := InvokeTool(connName, toolName, argsJSON)
 				if err != nil {
 					return &gomcp.CallToolResult{
@@ -83,7 +92,9 @@ func toolSchemaToMCPTool(ts protocol.ToolSchema) gomcp.Tool {
 	if len(ts.InputSchema) > 0 {
 		var schema gomcp.ToolInputSchema
 		if json.Unmarshal(ts.InputSchema, &schema) == nil {
-			schema.Type = "object"
+			if schema.Type == "" {
+				schema.Type = "object"
+			}
 			tool.InputSchema = schema
 		}
 	}
@@ -204,23 +215,56 @@ func handleConnector(manifest *parser.PluginManifest, request gomcp.CallToolRequ
 		payloadStr := request.GetString("payload", "{}")
 		reqID := fmt.Sprintf("mcp-%d", time.Now().UnixNano())
 		msg := protocol.NewCommand(manifest.Name, action, reqID, json.RawMessage(payloadStr))
-		data, _ := json.Marshal(msg)
-		conn.Write(append(data, '\n'))
-
-		// Read one response
-		buf := make([]byte, 65536)
-		n, err := conn.Read(buf)
+		data, err := json.Marshal(msg)
 		if err != nil {
+			return nil, fmt.Errorf("marshal command: %w", err)
+		}
+		if _, err := conn.Write(append(data, '\n')); err != nil {
 			return &gomcp.CallToolResult{
 				Content: []gomcp.Content{
-					gomcp.TextContent{Type: "text", Text: "Command sent, no response received"},
+					gomcp.TextContent{Type: "text", Text: fmt.Sprintf("Write failed: %v", err)},
 				},
+				IsError: true,
+			}, nil
+		}
+
+		// Read response using NDJSON scanner with timeout
+		conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+		scanner := bufio.NewScanner(conn)
+		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+		for scanner.Scan() {
+			var resp protocol.Message
+			if json.Unmarshal(scanner.Bytes(), &resp) != nil {
+				continue
+			}
+			if resp.ID == reqID {
+				if resp.Type == protocol.TypeError {
+					return &gomcp.CallToolResult{
+						Content: []gomcp.Content{
+							gomcp.TextContent{Type: "text", Text: fmt.Sprintf("Error: [%s] %s", resp.Code, resp.MessageStr)},
+						},
+						IsError: true,
+					}, nil
+				}
+				return &gomcp.CallToolResult{
+					Content: []gomcp.Content{
+						gomcp.TextContent{Type: "text", Text: string(scanner.Bytes())},
+					},
+				}, nil
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			return &gomcp.CallToolResult{
+				Content: []gomcp.Content{
+					gomcp.TextContent{Type: "text", Text: fmt.Sprintf("Read error: %v", err)},
+				},
+				IsError: true,
 			}, nil
 		}
 
 		return &gomcp.CallToolResult{
 			Content: []gomcp.Content{
-				gomcp.TextContent{Type: "text", Text: string(buf[:n])},
+				gomcp.TextContent{Type: "text", Text: "Command sent, no matching response received"},
 			},
 		}, nil
 	}

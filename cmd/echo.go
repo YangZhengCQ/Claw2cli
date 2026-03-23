@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/executor"
-	"github.com/user/claw2cli/internal/protocol"
+	"github.com/YangZhengCQ/Claw2cli/internal/executor"
+	"github.com/YangZhengCQ/Claw2cli/internal/protocol"
 )
 
 var echoCmd = &cobra.Command{
@@ -82,18 +82,32 @@ Useful for verifying the full bidirectional message flow.`,
 							Source: name,
 							ID:     msg.ID,
 						}
-						payload, _ := json.Marshal(map[string]string{"text": replyText})
+						payload, err := json.Marshal(map[string]string{"text": replyText})
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "marshal reply: %v\n", err)
+							continue
+						}
 						resp.Payload = payload
 
-						data, _ := json.Marshal(resp)
+						data, err := json.Marshal(resp)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "marshal response: %v\n", err)
+							continue
+						}
 						data = append(data, '\n')
-						conn.Write(data)
+						if _, err := conn.Write(data); err != nil {
+							fmt.Fprintf(os.Stderr, "write reply: %v\n", err)
+							return
+						}
 						fmt.Fprintf(os.Stderr, "✅ Sent: %s\n", replyText)
 					}
 
 				case protocol.TypeLog:
 					fmt.Fprintf(os.Stderr, "[%s] %s\n", msg.Level, msg.MessageStr)
 				}
+			}
+			if err := scanner.Err(); err != nil {
+				fmt.Fprintf(os.Stderr, "read error: %v\n", err)
 			}
 		}()
 

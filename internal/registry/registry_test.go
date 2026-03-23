@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/user/claw2cli/internal/protocol"
+	"github.com/YangZhengCQ/Claw2cli/internal/protocol"
 )
 
 func TestStoreAndGet(t *testing.T) {
@@ -47,7 +47,7 @@ func TestGetAll(t *testing.T) {
 	Store("b", []protocol.ToolSchema{{Name: "b_tool1"}, {Name: "b_tool2"}})
 
 	all := GetAll()
-	if len(all) < 3 {
-		t.Errorf("expected at least 3 tools, got %d", len(all))
+	if len(all) != 3 {
+		t.Errorf("expected exactly 3 tools, got %d", len(all))
 	}
 }

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/user/claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 )
 
 func TestBuildNpxArgs(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/paths"
 )
 
 var rootCmd = &cobra.Command{

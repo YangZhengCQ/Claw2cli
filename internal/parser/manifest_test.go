@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/user/claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/paths"
 )
 
 func TestParseManifest(t *testing.T) {

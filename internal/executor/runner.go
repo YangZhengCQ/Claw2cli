@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/user/claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 )
 
 // SkillResult holds the output from running a skill plugin.
@@ -21,6 +21,9 @@ type SkillResult struct {
 
 // DefaultTimeout is the default skill execution timeout.
 const DefaultTimeout = 30 * time.Second
+
+// maxOutputSize is the maximum captured output size from skill execution (10 MB).
+const maxOutputSize = 10 * 1024 * 1024
 
 // RunSkill executes a skill plugin as a subprocess via npx.
 func RunSkill(ctx context.Context, manifest *parser.PluginManifest, args []string, timeout time.Duration) (*SkillResult, error) {
@@ -44,6 +47,10 @@ func RunSkill(ctx context.Context, manifest *parser.PluginManifest, args []strin
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
+
+	if len(stdout.String()) > maxOutputSize || len(stderr.String()) > maxOutputSize {
+		return nil, fmt.Errorf("skill %q output exceeded %d bytes limit", manifest.Name, maxOutputSize)
+	}
 
 	result := &SkillResult{
 		Stdout: stdout.String(),
@@ -73,7 +80,7 @@ func RunSkill(ctx context.Context, manifest *parser.PluginManifest, args []strin
 
 // buildNpxArgs constructs the arguments for npx invocation.
 func buildNpxArgs(source string, args []string) []string {
-	npxArgs := []string{"-y", source}
+	npxArgs := []string{"-y", source, "--"}
 	npxArgs = append(npxArgs, args...)
 	return npxArgs
 }

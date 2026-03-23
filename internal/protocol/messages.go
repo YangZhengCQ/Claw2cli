@@ -1,6 +1,9 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // MessageType identifies the kind of NDJSON message.
 type MessageType string
@@ -50,6 +53,7 @@ func NewEvent(source, topic string, payload json.RawMessage) *Message {
 		Source:  source,
 		Topic:   topic,
 		Payload: payload,
+		Ts:      time.Now().Unix(),
 	}
 }
 
@@ -61,6 +65,7 @@ func NewCommand(source, action, id string, payload json.RawMessage) *Message {
 		Action:  action,
 		ID:      id,
 		Payload: payload,
+		Ts:      time.Now().Unix(),
 	}
 }
 
@@ -71,6 +76,7 @@ func NewResponse(source, id string, payload json.RawMessage) *Message {
 		Source:  source,
 		ID:      id,
 		Payload: payload,
+		Ts:      time.Now().Unix(),
 	}
 }
 
@@ -81,6 +87,7 @@ func NewError(source, code, message string) *Message {
 		Source:     source,
 		Code:       code,
 		MessageStr: message,
+		Ts:         time.Now().Unix(),
 	}
 }
 
@@ -91,6 +98,7 @@ func NewLog(source, level, message string) *Message {
 		Source:     source,
 		Level:      level,
 		MessageStr: message,
+		Ts:         time.Now().Unix(),
 	}
 }
 
@@ -107,11 +115,16 @@ type DiscoveryPayload struct {
 }
 
 // NewDiscovery creates a discovery message carrying tool schemas.
+// Returns nil if the tools cannot be marshaled (should not happen in practice).
 func NewDiscovery(source string, tools []ToolSchema) *Message {
-	payload, _ := json.Marshal(DiscoveryPayload{Tools: tools})
+	payload, err := json.Marshal(DiscoveryPayload{Tools: tools})
+	if err != nil {
+		return nil
+	}
 	return &Message{
 		Type:    TypeDiscovery,
 		Source:  source,
 		Payload: payload,
+		Ts:      time.Now().Unix(),
 	}
 }

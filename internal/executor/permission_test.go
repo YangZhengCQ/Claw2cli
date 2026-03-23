@@ -3,7 +3,7 @@ package executor
 import (
 	"testing"
 
-	"github.com/user/claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 )
 
 func TestCheckPermissions_ValidSkill(t *testing.T) {

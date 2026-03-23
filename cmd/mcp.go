@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	c2cmcp "github.com/user/claw2cli/internal/mcp"
-	"github.com/user/claw2cli/internal/parser"
+	c2cmcp "github.com/YangZhengCQ/Claw2cli/internal/mcp"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 )
 
 var mcpCmd = &cobra.Command{

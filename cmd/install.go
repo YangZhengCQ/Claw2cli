@@ -11,13 +11,14 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/nodeutil"
-	"github.com/user/claw2cli/internal/parser"
-	"github.com/user/claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/nodeutil"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/paths"
 	"gopkg.in/yaml.v3"
 )
 
 var pluginType string
+var skipVerify bool
 
 var installCmd = &cobra.Command{
 	Use:   "install <package>",
@@ -32,9 +33,14 @@ var installCmd = &cobra.Command{
 
 func init() {
 	installCmd.Flags().StringVar(&pluginType, "type", "skill", "Plugin type: skill or connector")
+	installCmd.Flags().BoolVar(&skipVerify, "skip-verify", false, "Skip checksum verification (not recommended)")
 }
 
 func installPlugin(source, pType string) error {
+	if pType != "skill" && pType != "connector" {
+		return fmt.Errorf("invalid plugin type %q: must be 'skill' or 'connector'", pType)
+	}
+
 	// Pre-flight: check that node and npm are available
 	if err := checkNodeNpm(); err != nil {
 		return err
@@ -52,19 +58,30 @@ func installPlugin(source, pType string) error {
 
 	// Derive plugin name from source
 	name := derivePluginName(source)
+	if err := paths.ValidateName(name); err != nil {
+		return fmt.Errorf("invalid plugin name derived from %q: %w", source, err)
+	}
+
+	// Check for existing plugin with the same name
+	pluginDir := paths.PluginDir(name)
+	if _, err := os.Stat(pluginDir); err == nil {
+		return fmt.Errorf("plugin %q already exists — uninstall it first or choose a different name", name)
+	}
 
 	fmt.Printf("Installing %q as %q (%s)...\n", source, name, pType)
 
 	// Get package info and checksum from npm
 	checksum, err := getNpmChecksum(source)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not get checksum: %v\n", err)
+		if !skipVerify {
+			return fmt.Errorf("could not verify package integrity: %w\n  To install without verification, use: c2c install --skip-verify %s", err, source)
+		}
+		fmt.Fprintf(os.Stderr, "Warning: skipping integrity verification: %v\n", err)
 		checksum = ""
 	}
 
 	// Create plugin directory
-	pluginDir := paths.PluginDir(name)
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+	if err := os.MkdirAll(pluginDir, 0700); err != nil {
 		return fmt.Errorf("create plugin dir: %w", err)
 	}
 
@@ -90,7 +107,7 @@ func installPlugin(source, pType string) error {
 	}
 
 	manifestPath := filepath.Join(pluginDir, "manifest.yaml")
-	if err := os.WriteFile(manifestPath, manifestData, 0644); err != nil {
+	if err := os.WriteFile(manifestPath, manifestData, 0600); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 
@@ -155,16 +172,21 @@ func preInstallPackage(source string) error {
 	}
 
 	// Also install the runtime plugin if different (e.g. strip -cli suffix)
+	// Preserve version from original source spec
 	runtimePkg := nodeutil.ResolvePluginPackage(source)
-	stripVersion := source
-	if strings.HasPrefix(stripVersion, "@") {
-		if idx := strings.LastIndex(stripVersion, "@"); idx > 0 {
-			stripVersion = stripVersion[:idx]
+	sourceBase := source
+	sourceVersion := ""
+	if strings.HasPrefix(sourceBase, "@") {
+		if idx := strings.LastIndex(sourceBase, "@"); idx > 0 {
+			sourceVersion = sourceBase[idx:]
+			sourceBase = sourceBase[:idx]
 		}
 	}
-	if runtimePkg != "" && runtimePkg != stripVersion {
-		fmt.Printf("Pre-installing runtime package: %s\n", runtimePkg)
-		cmd2 := exec.Command("npm", "install", "-g", runtimePkg)
+	if runtimePkg != "" && runtimePkg != sourceBase {
+		// Apply same version constraint to runtime package
+		runtimePkgVersioned := runtimePkg + sourceVersion
+		fmt.Printf("Pre-installing runtime package: %s\n", runtimePkgVersioned)
+		cmd2 := exec.Command("npm", "install", "-g", runtimePkgVersioned)
 		cmd2.Stdout = os.Stderr
 		cmd2.Stderr = os.Stderr
 		if err := cmd2.Run(); err != nil {
@@ -208,13 +230,8 @@ func derivePluginName(source string) string {
 
 // getNpmChecksum runs `npm info` to get the package's shasum.
 func getNpmChecksum(source string) (string, error) {
-	// Strip version for npm info
-	pkg := source
-	if idx := strings.LastIndex(pkg, "@"); idx > 0 {
-		pkg = pkg[:idx]
-	}
-
-	out, err := exec.Command("npm", "info", pkg, "--json").Output()
+	// Query npm info for the exact package spec (including version if specified)
+	out, err := exec.Command("npm", "info", source, "--json").Output()
 	if err != nil {
 		return "", err
 	}

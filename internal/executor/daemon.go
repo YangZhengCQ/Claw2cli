@@ -3,6 +3,7 @@ package executor
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -11,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/user/claw2cli/internal/parser"
-	"github.com/user/claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/paths"
 )
 
 // ConnectorStatus represents the state of a connector daemon.
@@ -57,7 +58,9 @@ func StartConnector(manifest *parser.PluginManifest) error {
 
 	// Redirect daemon stdout/stderr to log file
 	logPath := filepath.Join(paths.BaseDir(), "logs", manifest.Name+".log")
-	os.MkdirAll(filepath.Dir(logPath), 0700)
+	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
+		return fmt.Errorf("create log directory: %w", err)
+	}
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return fmt.Errorf("open log file: %w", err)
@@ -70,10 +73,18 @@ func StartConnector(manifest *parser.PluginManifest) error {
 		return fmt.Errorf("start daemon: %w", err)
 	}
 
+	// cleanup kills the child process if post-start operations fail
+	cleanup := func() {
+		cmd.Process.Kill()
+		cmd.Process.Wait()
+		cleanupConnectorFiles(manifest.Name)
+	}
+
 	// Write PID file
 	pidPath := paths.PIDPath(manifest.Name)
 	pidData := fmt.Sprintf("%d\n", cmd.Process.Pid)
-	if err := os.WriteFile(pidPath, []byte(pidData), 0644); err != nil {
+	if err := os.WriteFile(pidPath, []byte(pidData), 0600); err != nil {
+		cleanup()
 		return fmt.Errorf("write PID file: %w", err)
 	}
 
@@ -86,8 +97,15 @@ func StartConnector(manifest *parser.PluginManifest) error {
 		Socket:    paths.SocketPath(manifest.Name),
 		StartedAt: time.Now(),
 	}
-	metaData, _ := json.Marshal(meta)
-	os.WriteFile(metaPath, metaData, 0644)
+	metaData, err := json.Marshal(meta)
+	if err != nil {
+		cleanup()
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+	if err := os.WriteFile(metaPath, metaData, 0600); err != nil {
+		cleanup()
+		return fmt.Errorf("write metadata: %w", err)
+	}
 
 	// Detach — don't wait for the child
 	cmd.Process.Release()
@@ -189,6 +207,7 @@ func ListConnectors() ([]ConnectorStatus, error) {
 		name := strings.TrimSuffix(e.Name(), ".pid")
 		status, err := GetConnectorStatus(name)
 		if err != nil {
+			log.Printf("skipping connector %q: %v", name, err)
 			continue
 		}
 		statuses = append(statuses, *status)

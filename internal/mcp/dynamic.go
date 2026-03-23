@@ -2,11 +2,12 @@ package mcp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/user/claw2cli/internal/protocol"
+	"github.com/YangZhengCQ/Claw2cli/internal/protocol"
 )
 
 // DiscoverTools queries a running connector via UDS for its discovered tool schemas.
@@ -19,22 +20,43 @@ func DiscoverTools(connectorName string) ([]protocol.ToolSchema, error) {
 
 	reqID := fmt.Sprintf("mcp-discover-%d", time.Now().UnixNano())
 	msg := protocol.NewCommand("c2c-mcp", "list_tools", reqID, nil)
-	data, _ := json.Marshal(msg)
-	conn.Write(append(data, '\n'))
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return nil, fmt.Errorf("marshal discover request: %w", err)
+	}
+	if _, err := conn.Write(append(data, '\n')); err != nil {
+		return nil, fmt.Errorf("write discover request: %w", err)
+	}
 
-	resultCh := make(chan []protocol.ToolSchema, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	type discoverResult struct {
+		tools []protocol.ToolSchema
+		err   error
+	}
+	resultCh := make(chan discoverResult, 1)
 	go func() {
 		scanner := bufio.NewScanner(conn)
 		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			var resp protocol.Message
 			if json.Unmarshal(scanner.Bytes(), &resp) != nil {
 				continue
 			}
+			if resp.ID == reqID && resp.Type == protocol.TypeError {
+				resultCh <- discoverResult{err: fmt.Errorf("[%s] %s", resp.Code, resp.MessageStr)}
+				return
+			}
 			if resp.ID == reqID && resp.Type == protocol.TypeResponse {
 				var dp protocol.DiscoveryPayload
 				if json.Unmarshal(resp.Payload, &dp) == nil {
-					resultCh <- dp.Tools
+					resultCh <- discoverResult{tools: dp.Tools}
 				}
 				return
 			}
@@ -42,9 +64,9 @@ func DiscoverTools(connectorName string) ([]protocol.ToolSchema, error) {
 	}()
 
 	select {
-	case tools := <-resultCh:
-		return tools, nil
-	case <-time.After(5 * time.Second):
+	case r := <-resultCh:
+		return r.tools, r.err
+	case <-ctx.Done():
 		return nil, fmt.Errorf("timeout querying tools for %s", connectorName)
 	}
 }
@@ -58,13 +80,24 @@ func InvokeTool(connectorName, toolName string, args json.RawMessage) (json.RawM
 	defer conn.Close()
 
 	reqID := fmt.Sprintf("mcp-invoke-%d", time.Now().UnixNano())
-	payload, _ := json.Marshal(map[string]interface{}{
+	payload, err := json.Marshal(map[string]interface{}{
 		"tool": toolName,
 		"args": args,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal invoke payload: %w", err)
+	}
 	msg := protocol.NewCommand("c2c-mcp", "invoke_tool", reqID, payload)
-	data, _ := json.Marshal(msg)
-	conn.Write(append(data, '\n'))
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return nil, fmt.Errorf("marshal invoke request: %w", err)
+	}
+	if _, err := conn.Write(append(data, '\n')); err != nil {
+		return nil, fmt.Errorf("write invoke request: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	type result struct {
 		payload json.RawMessage
@@ -76,6 +109,11 @@ func InvokeTool(connectorName, toolName string, args json.RawMessage) (json.RawM
 		scanner := bufio.NewScanner(conn)
 		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 		for scanner.Scan() {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			var resp protocol.Message
 			if json.Unmarshal(scanner.Bytes(), &resp) != nil {
 				continue
@@ -92,13 +130,17 @@ func InvokeTool(connectorName, toolName string, args json.RawMessage) (json.RawM
 				return
 			}
 		}
-		resultCh <- result{err: fmt.Errorf("connection closed")}
+		if err := scanner.Err(); err != nil {
+			resultCh <- result{err: fmt.Errorf("read error: %w", err)}
+		} else {
+			resultCh <- result{err: fmt.Errorf("connection closed")}
+		}
 	}()
 
 	select {
 	case r := <-resultCh:
 		return r.payload, r.err
-	case <-time.After(30 * time.Second):
+	case <-ctx.Done():
 		return nil, fmt.Errorf("timeout invoking %s on %s", toolName, connectorName)
 	}
 }

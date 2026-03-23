@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/paths"
 )
 
 var followLogs bool
@@ -23,7 +25,7 @@ var logsCmd = &cobra.Command{
 
 		f, err := os.Open(logPath)
 		if err != nil {
-			return fmt.Errorf("no logs found for %q", name)
+			return fmt.Errorf("open logs for %q: %w", name, err)
 		}
 		defer f.Close()
 
@@ -37,8 +39,18 @@ var logsCmd = &cobra.Command{
 		// First dump existing content
 		io.Copy(os.Stdout, f)
 
+		// Handle Ctrl+C
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
+
 		// Then poll for new content
 		for {
+			select {
+			case <-sigCh:
+				return nil
+			default:
+			}
 			n, err := io.Copy(os.Stdout, f)
 			if err != nil {
 				return err
