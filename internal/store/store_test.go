@@ -69,6 +69,33 @@ func TestNodeModulesPath(t *testing.T) {
 	}
 }
 
+func TestCleanupReplacedPackages(t *testing.T) {
+	dir := t.TempDir()
+	s := &Store{pluginDir: dir, name: "test"}
+	nm := s.NodeModulesPath()
+
+	// Create fake packages that our shim replaces
+	for _, pkg := range []string{"openclaw", "clawdbot", "@mariozechner/pi-ai"} {
+		os.MkdirAll(filepath.Join(nm, pkg), 0700)
+		os.WriteFile(filepath.Join(nm, pkg, "index.js"), []byte("module.exports = {}"), 0600)
+	}
+
+	// Verify they exist
+	if _, err := os.Stat(filepath.Join(nm, "openclaw")); err != nil {
+		t.Fatal("openclaw should exist before cleanup")
+	}
+
+	// Run cleanup
+	s.CleanupReplacedPackages()
+
+	// Verify they're gone
+	for _, pkg := range []string{"openclaw", "clawdbot", "@mariozechner"} {
+		if _, err := os.Stat(filepath.Join(nm, pkg)); err == nil {
+			t.Errorf("%s should be removed after cleanup", pkg)
+		}
+	}
+}
+
 func TestResolveTsx(t *testing.T) {
 	// Should return something (tsx, node, or local path)
 	result := ResolveTsx()

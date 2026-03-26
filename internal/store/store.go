@@ -81,10 +81,27 @@ func (s *Store) Install(source string) (resolvedVersion, integrity string, err e
 		}
 	}
 
+	// Remove packages that our shim replaces (prevents pi-ai/oauth conflicts)
+	s.CleanupReplacedPackages()
+
 	// Get integrity hash
 	integrity, _ = getIntegrity(source)
 
 	return resolvedVersion, integrity, nil
+}
+
+// replacedPackages are packages that our shim replaces at runtime.
+// They get pulled as transitive deps during local npm install but conflict
+// with our fake SDK (e.g., pi-ai/oauth subpath export missing).
+var replacedPackages = []string{"openclaw", "clawdbot", "@mariozechner"}
+
+// CleanupReplacedPackages removes packages from local node_modules
+// that our shim replaces (openclaw core, clawdbot, pi-ai).
+func (s *Store) CleanupReplacedPackages() {
+	nm := s.NodeModulesPath()
+	for _, pkg := range replacedPackages {
+		os.RemoveAll(filepath.Join(nm, pkg))
+	}
 }
 
 // Verify checks that installed packages match manifest integrity hashes.
