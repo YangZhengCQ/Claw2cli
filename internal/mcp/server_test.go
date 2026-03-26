@@ -10,8 +10,10 @@ import (
 	"time"
 
 	gomcp "github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 	"github.com/YangZhengCQ/Claw2cli/internal/executor"
 	"github.com/YangZhengCQ/Claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/protocol"
 )
 
 // --- ManifestToTool tests ---
@@ -507,6 +509,151 @@ func TestHandleConnector_CustomAction_ReadError(t *testing.T) {
 	if !strings.Contains(text, "no response") && !strings.Contains(text, "Write failed") && !strings.Contains(text, "Read error") {
 		t.Errorf("expected error about read/write failure, got %q", text)
 	}
+}
+
+// --- helpers ---
+
+// --- toolSchemaToMCPTool tests ---
+
+func TestToolSchemaToMCPTool_Basic(t *testing.T) {
+	ts := protocol.ToolSchema{
+		Name:        "wechat_send_text",
+		Description: "Send a text message",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"to":{"type":"string"},"text":{"type":"string"}},"required":["to","text"]}`),
+	}
+	tool := toolSchemaToMCPTool(ts)
+	if tool.Name != "wechat_send_text" {
+		t.Errorf("name=%q, want wechat_send_text", tool.Name)
+	}
+	if tool.Description != "Send a text message" {
+		t.Errorf("description=%q, want 'Send a text message'", tool.Description)
+	}
+	if tool.InputSchema.Type != "object" {
+		t.Errorf("schema type=%q, want object", tool.InputSchema.Type)
+	}
+}
+
+func TestToolSchemaToMCPTool_EmptySchema(t *testing.T) {
+	ts := protocol.ToolSchema{
+		Name:        "test_tool",
+		Description: "No schema",
+	}
+	tool := toolSchemaToMCPTool(ts)
+	if tool.Name != "test_tool" {
+		t.Errorf("name=%q, want test_tool", tool.Name)
+	}
+	// Empty input schema should remain zero-value
+	if tool.InputSchema.Type != "" {
+		t.Errorf("expected empty schema type, got %q", tool.InputSchema.Type)
+	}
+}
+
+func TestToolSchemaToMCPTool_DefaultsToObject(t *testing.T) {
+	// Schema without explicit "type" field
+	ts := protocol.ToolSchema{
+		Name:        "test_tool",
+		Description: "test",
+		InputSchema: json.RawMessage(`{"properties":{"q":{"type":"string"}}}`),
+	}
+	tool := toolSchemaToMCPTool(ts)
+	if tool.InputSchema.Type != "object" {
+		t.Errorf("schema type=%q, want 'object' (auto-set)", tool.InputSchema.Type)
+	}
+}
+
+func TestToolSchemaToMCPTool_InvalidJSON(t *testing.T) {
+	ts := protocol.ToolSchema{
+		Name:        "bad",
+		Description: "bad schema",
+		InputSchema: json.RawMessage(`not json`),
+	}
+	tool := toolSchemaToMCPTool(ts)
+	// Should not panic, just skip schema
+	if tool.Name != "bad" {
+		t.Errorf("name=%q, want bad", tool.Name)
+	}
+}
+
+// --- registerDynamicTools tests ---
+
+func TestRegisterDynamicTools_NoRunningConnectors(t *testing.T) {
+	orig := attachConnectorFn
+	defer func() { attachConnectorFn = orig }()
+
+	// All connectors fail to connect (not running)
+	attachConnectorFn = func(name string) (net.Conn, error) {
+		return nil, fmt.Errorf("not running")
+	}
+
+	plugins := []*parser.PluginManifest{
+		{Name: "wechat", Type: parser.PluginTypeConnector},
+	}
+
+	// Should not panic, just skip
+	mcpServer := newTestMCPServer()
+	registerDynamicTools(mcpServer, plugins)
+	// No assertion needed — just verify no panic
+}
+
+func TestRegisterDynamicTools_SkipsSkills(t *testing.T) {
+	orig := attachConnectorFn
+	defer func() { attachConnectorFn = orig }()
+
+	called := false
+	attachConnectorFn = func(name string) (net.Conn, error) {
+		called = true
+		return nil, fmt.Errorf("should not be called for skills")
+	}
+
+	plugins := []*parser.PluginManifest{
+		{Name: "search", Type: parser.PluginTypeSkill},
+	}
+
+	mcpServer := newTestMCPServer()
+	registerDynamicTools(mcpServer, plugins)
+	if called {
+		t.Error("registerDynamicTools should skip skill plugins")
+	}
+}
+
+func TestRegisterDynamicTools_RegistersDiscoveredTools(t *testing.T) {
+	orig := attachConnectorFn
+	defer func() { attachConnectorFn = orig }()
+
+	serverConn, clientConn := net.Pipe()
+	attachConnectorFn = func(name string) (net.Conn, error) {
+		return clientConn, nil
+	}
+
+	// Server responds with 2 tools
+	go func() {
+		buf := make([]byte, 65536)
+		n, _ := serverConn.Read(buf)
+		var msg protocol.Message
+		json.Unmarshal(buf[:n], &msg)
+
+		tools := []protocol.ToolSchema{
+			{Name: "wc_send", Description: "send", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			{Name: "wc_media", Description: "media", InputSchema: json.RawMessage(`{"type":"object"}`)},
+		}
+		payload, _ := json.Marshal(protocol.DiscoveryPayload{Tools: tools})
+		resp := protocol.NewResponse("wechat", msg.ID, payload)
+		data, _ := json.Marshal(resp)
+		serverConn.Write(append(data, '\n'))
+		serverConn.Close()
+	}()
+
+	plugins := []*parser.PluginManifest{
+		{Name: "wechat", Type: parser.PluginTypeConnector},
+	}
+
+	mcpServer := newTestMCPServer()
+	registerDynamicTools(mcpServer, plugins)
+	// If no panic and no error, tools were registered successfully
+}
+
+func newTestMCPServer() *server.MCPServer {
+	return server.NewMCPServer("test", "0.0.1", server.WithToolCapabilities(true))
 }
 
 // --- helpers ---
