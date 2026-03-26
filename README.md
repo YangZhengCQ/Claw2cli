@@ -38,7 +38,7 @@ go install github.com/YangZhengCQ/Claw2cli@latest
 # Install a plugin
 c2c install @tencent-weixin/openclaw-weixin-cli --type connector
 
-# Start WeChat connector (foreground — shows QR code for login)
+# Start WeChat connector (runs as background daemon)
 c2c connect wechat
 
 # Discover what the plugin can do
@@ -47,8 +47,8 @@ c2c call wechat --list-tools
 # Invoke a tool
 c2c call wechat wechat_send_text '{"to":"user@im.wechat","text":"hello"}'
 
-# Or run in background
-c2c connect wechat -b
+# Foreground mode (for QR login or debugging)
+c2c connect wechat -f
 
 # Check status
 c2c status
@@ -89,7 +89,7 @@ Discovered 2 tool(s) for "wechat":
 | Command | Description |
 |---------|-------------|
 | `c2c run <skill> [args]` | Run a skill plugin (one-shot) |
-| `c2c connect <connector>` | Start a connector (foreground by default, `-b` for background, `--no-sandbox` to disable OS sandbox) |
+| `c2c connect <connector>` | Start a connector daemon (background by default, `-f` foreground for debugging) |
 | `c2c stop <connector>` | Stop a running connector |
 | `c2c attach <connector>` | Stream messages from a running connector |
 | `c2c echo <connector>` | Test consumer that echoes back received messages |

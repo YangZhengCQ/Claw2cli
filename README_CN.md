@@ -89,7 +89,7 @@ Discovered 2 tool(s) for "wechat":
 | 命令 | 说明 |
 |------|------|
 | `c2c run <skill> [args]` | 运行技能插件（一次性） |
-| `c2c connect <connector>` | 启动连接器（默认前台，`-b` 后台，`--no-sandbox` 禁用沙箱） |
+| `c2c connect <connector>` | 启动连接器守护进程（默认后台，`-f` 前台调试模式） |
 | `c2c stop <connector>` | 停止运行中的连接器 |
 | `c2c attach <connector>` | 连接到运行中的连接器，查看消息流 |
 | `c2c echo <connector>` | 测试消费者，自动回复收到的消息 |
