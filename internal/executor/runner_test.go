@@ -225,3 +225,25 @@ func TestRunSkill_InvalidJSON(t *testing.T) {
 		t.Error("expected Output to be nil for invalid JSON")
 	}
 }
+
+func TestLimitedWriter_CapsAtLimit(t *testing.T) {
+	lw := &limitedWriter{limit: 10}
+	n, err := lw.Write([]byte("12345"))
+	if err != nil || n != 5 {
+		t.Fatalf("first write: n=%d, err=%v", n, err)
+	}
+	n, err = lw.Write([]byte("67890OVERFLOW"))
+	// Should write up to limit (5 more bytes) then stop
+	if lw.Len() > 10 {
+		t.Errorf("limitedWriter exceeded limit: got %d bytes", lw.Len())
+	}
+}
+
+func TestLimitedWriter_Exceeded(t *testing.T) {
+	lw := &limitedWriter{limit: 5}
+	lw.Write([]byte("12345"))
+	lw.Write([]byte("X"))
+	if !lw.exceeded {
+		t.Error("expected exceeded=true after writing past limit")
+	}
+}

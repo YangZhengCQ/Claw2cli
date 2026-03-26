@@ -10,6 +10,7 @@ import (
 	"github.com/YangZhengCQ/Claw2cli/internal/nodeutil"
 	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 	"github.com/YangZhengCQ/Claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/store"
 	"gopkg.in/yaml.v3"
 )
 
@@ -107,9 +108,10 @@ func updateSinglePlugin(manifest *parser.PluginManifest) (bool, error) {
 		return true, nil
 	}
 
-	// Install the updated package
+	// Install the updated package to local store (not global)
 	fmt.Printf("  Installing update...\n")
-	if err := nodeutil.EnsurePluginInstalled(manifest.Source); err != nil {
+	s := store.New(manifest.Name)
+	if _, _, err := s.Install(manifest.Source); err != nil {
 		return false, fmt.Errorf("install: %w", err)
 	}
 

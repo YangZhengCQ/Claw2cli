@@ -27,6 +27,30 @@ const DefaultTimeout = 30 * time.Second
 // maxOutputSize is the maximum captured output size from skill execution (10 MB).
 const maxOutputSize = 10 * 1024 * 1024
 
+// limitedWriter caps writes at a byte limit to prevent OOM from malicious plugins.
+type limitedWriter struct {
+	buf      strings.Builder
+	limit    int
+	exceeded bool
+}
+
+func (w *limitedWriter) Write(p []byte) (int, error) {
+	remaining := w.limit - w.buf.Len()
+	if remaining <= 0 {
+		w.exceeded = true
+		return len(p), nil // accept but discard
+	}
+	if len(p) > remaining {
+		w.buf.Write(p[:remaining])
+		w.exceeded = true
+		return len(p), nil
+	}
+	return w.buf.Write(p)
+}
+
+func (w *limitedWriter) String() string { return w.buf.String() }
+func (w *limitedWriter) Len() int       { return w.buf.Len() }
+
 // RunSkill executes a skill plugin as a subprocess using the local store.
 func RunSkill(ctx context.Context, manifest *parser.PluginManifest, args []string, timeout time.Duration) (*SkillResult, error) {
 	if err := CheckPermissions(manifest); err != nil {
@@ -49,13 +73,14 @@ func RunSkill(ctx context.Context, manifest *parser.PluginManifest, args []strin
 	cmd := execCommandCtx(ctx, tsxPath, filepath.Join(s.NodeModulesPath(), ".bin", manifest.Name))
 	cmd.Env = append(BuildEnv(manifest), "NODE_PATH="+s.NodeModulesPath())
 
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := &limitedWriter{limit: maxOutputSize}
+	stderr := &limitedWriter{limit: maxOutputSize}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
 	err := cmd.Run()
 
-	if len(stdout.String()) > maxOutputSize || len(stderr.String()) > maxOutputSize {
+	if stdout.exceeded || stderr.exceeded {
 		return nil, fmt.Errorf("skill %q output exceeded %d bytes limit", manifest.Name, maxOutputSize)
 	}
 

@@ -58,7 +58,7 @@ func (s *Store) Install(source string) (resolvedVersion, integrity string, err e
 	}
 
 	// Install locally
-	cmd := execCommandFn("npm", "install", "--prefix", s.pluginDir, exactSpec)
+	cmd := execCommandFn("npm", "install", "--ignore-scripts", "--prefix", s.pluginDir, exactSpec)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -73,7 +73,7 @@ func (s *Store) Install(source string) (resolvedVersion, integrity string, err e
 		if resolvedVersion != "" {
 			runtimeSpec = runtimePkg + "@" + resolvedVersion
 		}
-		cmd2 := execCommandFn("npm", "install", "--prefix", s.pluginDir, runtimeSpec)
+		cmd2 := execCommandFn("npm", "install", "--ignore-scripts", "--prefix", s.pluginDir, runtimeSpec)
 		cmd2.Stdout = os.Stderr
 		cmd2.Stderr = os.Stderr
 		if err := cmd2.Run(); err != nil {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -93,6 +94,37 @@ func TestCleanupReplacedPackages(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(nm, pkg)); err == nil {
 			t.Errorf("%s should be removed after cleanup", pkg)
 		}
+	}
+}
+
+func TestInstall_PassesIgnoreScripts(t *testing.T) {
+	orig := execCommandFn
+	defer func() { execCommandFn = orig }()
+
+	var capturedArgs [][]string
+	execCommandFn = func(name string, args ...string) *exec.Cmd {
+		capturedArgs = append(capturedArgs, append([]string{name}, args...))
+		return exec.Command("echo", "ok") // no-op
+	}
+
+	dir := t.TempDir()
+	s := &Store{pluginDir: dir, name: "test"}
+
+	s.Install("@test/pkg@1.0.0")
+
+	// Verify --ignore-scripts is in the npm install command
+	found := false
+	for _, args := range capturedArgs {
+		if args[0] == "npm" && len(args) > 1 && args[1] == "install" {
+			for _, a := range args {
+				if a == "--ignore-scripts" {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Errorf("npm install should include --ignore-scripts, got commands: %v", capturedArgs)
 	}
 }
 
