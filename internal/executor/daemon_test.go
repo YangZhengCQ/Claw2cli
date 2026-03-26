@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/YangZhengCQ/Claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/protocol"
 )
 
 func TestIsProcessRunning(t *testing.T) {
@@ -458,6 +459,118 @@ func TestStopConnector_ViaSocket(t *testing.T) {
 	// Socket file should be cleaned up
 	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
 		t.Error("socket file should be cleaned up")
+	}
+}
+
+func TestAttachConnector_FallbackToDirectSocket(t *testing.T) {
+	// When no PID file exists but socket is available, AttachConnector
+	// should fall back to direct socket connection (foreground mode).
+	dir, err := os.MkdirTemp("/tmp", "c2c-")
+	if err != nil {
+		t.Fatalf("mktemp: %v", err)
+	}
+	defer os.RemoveAll(dir)
+	origBase := paths.BaseDir()
+	paths.SetBaseDir(dir)
+	defer paths.SetBaseDir(origBase)
+	paths.EnsureDirs()
+
+	// Create a real UDS listener (no PID file — simulates foreground mode)
+	socketPath := paths.SocketPath("fb")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	// Accept one connection
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		conn.Write([]byte(`{"type":"log","source":"fb","level":"info","message":"hello"}` + "\n"))
+		conn.Close()
+	}()
+
+	// AttachConnector should succeed via fallback (no PID file)
+	conn, err := AttachConnector("fb")
+	if err != nil {
+		t.Fatalf("AttachConnector should succeed via socket fallback: %v", err)
+	}
+	defer conn.Close()
+
+	// Read the greeting
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(buf[:n]), "hello") {
+		t.Errorf("expected greeting, got: %s", string(buf[:n]))
+	}
+}
+
+func TestWaitForReady_PongResponse(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "c2c-")
+	if err != nil {
+		t.Fatalf("mktemp: %v", err)
+	}
+	defer os.RemoveAll(dir)
+	origBase := paths.BaseDir()
+	paths.SetBaseDir(dir)
+	defer paths.SetBaseDir(origBase)
+	paths.EnsureDirs()
+
+	// Create a UDS listener that responds to ping with pong
+	socketPath := paths.SocketPath("rdy")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+		var msg protocol.Message
+		if json.Unmarshal(buf[:n], &msg) == nil && msg.Type == protocol.TypePing {
+			pong := protocol.NewPong("rdy", msg.ID)
+			data, _ := json.Marshal(pong)
+			conn.Write(append(data, '\n'))
+		}
+	}()
+
+	// waitForReady should succeed
+	err = waitForReady("rdy", 5*time.Second)
+	if err != nil {
+		t.Fatalf("waitForReady should succeed with pong: %v", err)
+	}
+}
+
+func TestWaitForReady_Timeout(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "c2c-")
+	if err != nil {
+		t.Fatalf("mktemp: %v", err)
+	}
+	defer os.RemoveAll(dir)
+	origBase := paths.BaseDir()
+	paths.SetBaseDir(dir)
+	defer paths.SetBaseDir(origBase)
+	paths.EnsureDirs()
+
+	// No listener on socket — waitForReady should timeout
+	err = waitForReady("noexist", 1*time.Second)
+	if err == nil {
+		t.Fatal("waitForReady should fail when no daemon is listening")
+	}
+	if !strings.Contains(err.Error(), "ready") {
+		t.Errorf("expected 'ready' in error, got: %v", err)
 	}
 }
 
