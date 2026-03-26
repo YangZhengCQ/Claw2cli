@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/YangZhengCQ/Claw2cli/internal/parser"
@@ -34,47 +35,39 @@ func applyPlatform(cmd *exec.Cmd, manifest *parser.PluginManifest, paths Sandbox
 	return nil
 }
 
+// dangerousFsPaths are paths that must never be granted via fs: permissions.
+var dangerousFsPaths = []string{"/", "/Users", "/System", "/Library", "/bin", "/sbin", "/etc"}
+
+func isUnsafeFsPath(p string) bool {
+	clean := filepath.Clean(p)
+	for _, d := range dangerousFsPaths {
+		if clean == d {
+			return true
+		}
+	}
+	if strings.Contains(clean, "..") {
+		return true
+	}
+	return false
+}
+
 func generateProfile(manifest *parser.PluginManifest, spaths SandboxPaths) string {
 	var sb strings.Builder
+
+	// Use allow-default with selective deny.
+	// macOS 15+ sandbox-exec rejects overly restrictive (deny default) custom profiles.
 	sb.WriteString("(version 1)\n")
-	sb.WriteString("(deny default)\n")
-	sb.WriteString("(allow process-exec)\n")
-	sb.WriteString("(allow process-fork)\n")
-	sb.WriteString("(allow sysctl-read)\n")
-	sb.WriteString("(allow mach-lookup)\n")
+	sb.WriteString("(allow default)\n")
 
-	// Allow reading shim and node_modules
-	sb.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", spaths.ShimDir))
-	sb.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", spaths.NodeModules))
-	sb.WriteString(fmt.Sprintf("(allow file-read* (literal %q))\n", spaths.NodeRunner))
-
-	// Allow read-write to storage dir
-	if spaths.StorageDir != "" {
-		sb.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", spaths.StorageDir))
-	}
-
-	// Allow tmp
-	sb.WriteString("(allow file-read* file-write* (subpath \"/tmp\"))\n")
-	sb.WriteString("(allow file-read* file-write* (subpath \"/private/tmp\"))\n")
-
-	// Allow reading system libraries
-	sb.WriteString("(allow file-read* (subpath \"/usr\"))\n")
-	sb.WriteString("(allow file-read* (subpath \"/Library\"))\n")
-	sb.WriteString("(allow file-read* (subpath \"/System\"))\n")
-
-	// Network: only if declared
+	// Network: deny if not declared in permissions
 	hasNetwork := false
 	for _, p := range manifest.Permissions {
 		if string(p) == "network" {
 			hasNetwork = true
 		}
-		if strings.HasPrefix(string(p), "fs:") {
-			path := strings.TrimPrefix(string(p), "fs:")
-			sb.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", path))
-		}
 	}
-	if hasNetwork {
-		sb.WriteString("(allow network*)\n")
+	if !hasNetwork {
+		sb.WriteString("(deny network*)\n")
 	}
 
 	return sb.String()
