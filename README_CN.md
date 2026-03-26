@@ -38,7 +38,7 @@ go install github.com/YangZhengCQ/Claw2cli@latest
 # 安装插件
 c2c install @tencent-weixin/openclaw-weixin-cli --type connector
 
-# 启动微信连接器（前台模式，显示二维码供扫码登录）
+# 启动微信连接器（后台守护进程）
 c2c connect wechat
 
 # 查看有哪些功能
@@ -47,8 +47,8 @@ c2c call wechat --list-tools
 # 调用工具
 c2c call wechat wechat_send_text '{"to":"user@im.wechat","text":"hello"}'
 
-# 或后台运行
-c2c connect wechat -b
+# 前台模式（调试/QR 登录）
+c2c connect wechat -f
 
 # 查看状态
 c2c status

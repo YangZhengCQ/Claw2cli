@@ -154,19 +154,10 @@ Five message types, all carrying a `source` field for multi-connector routing:
 Go doesn't support `fork()`. We use a **hidden subcommand self-reinvocation** pattern:
 
 ```
-c2c connect wechat          # Foreground (default): direct daemon, QR codes visible
-c2c connect wechat -b       # Background: detached via Setsid
+c2c connect wechat          # Background daemon (default): detached via Setsid
+c2c connect wechat -f       # Foreground mode: direct daemon, QR codes visible (debugging)
 
-Foreground mode:
-    Go calls runDaemon() directly
-    │
-    ├─ Subprocess: tsx c2c-shim.js wechat (ESM + TypeScript)
-    ├─ stdout → parse NDJSON, print logs/events to terminal
-    ├─ stderr → passthrough to terminal (QR codes, interactive prompts)
-    ├─ Ctrl+C → SIGTERM → 3s grace → SIGKILL
-    └─ UDS listener (supports parallel attach)
-
-Background mode:
+Background mode (default):
     Go executes `c2c _daemon wechat` (hidden subcommand), detached via Setsid
     │
     ├─ Subprocess: tsx c2c-shim.js wechat
@@ -175,6 +166,15 @@ Background mode:
     ├─ PID → ~/.c2c/pids/wechat.pid
     ├─ Metadata → ~/.c2c/pids/wechat.json
     └─ Logs → ~/.c2c/logs/wechat.log
+
+Foreground mode (-f, for debugging):
+    Go calls runDaemon() directly
+    │
+    ├─ Subprocess: tsx c2c-shim.js wechat (ESM + TypeScript)
+    ├─ stdout → parse NDJSON, print logs/events to terminal
+    ├─ stderr → passthrough to terminal (QR codes, interactive prompts)
+    ├─ Ctrl+C → SIGTERM → 9s grace → SIGKILL
+    └─ UDS listener (supports parallel attach)
 ```
 
 Management commands:
@@ -551,7 +551,7 @@ The shim's bridge functions wrap plugin internals into clean, agent-friendly ope
 | IPC | Pipe for control, UDS for data | Full-duplex + multi-consumer + reconnectable |
 | UDS protocol | NDJSON | Native Go Scanner + JS readline support |
 | Node runner | tsx first, node fallback | Plugins ship ESM + TS source, no pre-compiled JS |
-| Connect default | Foreground, `-b` for background | First login needs QR code visibility |
+| Connect default | Background daemon, `-f` for foreground | Daemon is the standard use case; foreground only for debugging/QR login |
 | Shutdown timeout | SIGTERM → 3s → SIGKILL | Prevent blocking from pending `get_reply` |
 | CLI vs runtime pkg | Auto-detect and install both | `-cli` suffix = installer wrapper, strip for runtime |
 | Security strategy | Phase 1: hash + declarative perms; Phase 2: runtime sandbox | Layered defense, don't block delivery |

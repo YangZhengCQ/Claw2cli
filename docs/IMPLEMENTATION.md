@@ -23,7 +23,7 @@ Claw2Cli/
 ├── cmd/                             # Cobra CLI commands
 │   ├── root.go                      # Root command + subcommand registration
 │   ├── install.go                   # c2c install — plugin installation with pre-flight checks
-│   ├── connect.go                   # c2c connect — foreground/background mode switch
+│   ├── connect.go                   # c2c connect — background (default) / -f foreground
 │   ├── daemon.go                    # Hidden _daemon subcommand + shim process management
 │   ├── run.go                       # c2c run — skill execution
 │   ├── attach.go                    # c2c attach — UDS stream viewer
@@ -309,19 +309,19 @@ Connector tools (dynamic): `registerDynamicTools()` queries each running connect
 
 ## 10. Test Coverage
 
-As of 2026-03-27 (post PR #1 merge):
+As of 2026-03-27 (post grill fixes + TDD tests):
 
 | Package | Coverage |
 |---------|----------|
 | internal/registry | 94.1% |
 | internal/parser | 94.0% |
+| internal/executor | 87.6% |
 | internal/protocol | 86.7% |
-| internal/executor | 82.0% |
-| internal/mcp | 69.2% |
+| internal/mcp | 79.6% |
 | internal/paths | 62.9% |
+| internal/sandbox | 57.9% |
+| internal/store | 48.9% |
 | internal/nodeutil | 31.5% |
-| internal/store | 20.7% |
-| internal/sandbox | 0.0% |
 
 `cmd/` and `main.go` are excluded from coverage (CLI integration layer).
 `internal/config` was removed in PR #1 (Viper dependency also removed).
