@@ -8,6 +8,6 @@ linters:
     - ineffassign
     - gosec
 
-issues:
+run:
   exclude-dirs:
     - testdata
