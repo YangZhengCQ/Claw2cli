@@ -75,7 +75,7 @@ Claw2Cli is a **Go CLI compatibility layer** that extracts high-quality plugins 
 **Binary size:** ~8MB (single binary, no external dependencies)
 
 Rationale:
-- **Single binary distribution** — no Node.js install required (plugin deps fetched via npx on demand)
+- **Single binary distribution** — plugins installed locally per-plugin (`~/.c2c/plugins/<name>/node_modules`)
 - **Goroutines** — natural fit for concurrent long-lived connections
 - **Cross-platform** — macOS (darwin/arm64, darwin/amd64) + Linux (linux/amd64, linux/arm64)
 
@@ -96,19 +96,19 @@ Go calls plugin subprocesses via `os/exec`, running OpenClaw plugins natively:
 c2c run google-search --query "AI news"
     │
     ▼
-Parse SKILL.md → build npx command → execute subprocess → collect stdout/stderr → format output
+Parse SKILL.md → resolve local package → execute via tsx → collect stdout/stderr → format output
 ```
 
 Benefits:
 - **Isolation:** plugin crash only kills the subprocess, not the Go process
-- **Version control:** parse version from SKILL.md, dynamically call `npx @package@version`
-- **Zero JS deps:** Go binary doesn't need Node.js; plugin deps fetched via npx
+- **Version control:** packages pinned to exact version at install time in local `node_modules`
+- **Zero runtime network calls:** all deps pre-installed locally; no npm fetch at connect/run time
 
 ### 4.3 JS-Go Bridge
 
 **Skills — stdin/stdout pipe (simple):**
 ```
-Go → os/exec → npx skill-plugin --json → stdout → Go parses JSON result
+Go → os/exec → tsx <local-node_modules/.bin/skill> --json → stdout → Go parses JSON result
 ```
 
 **Connectors — stdin/stdout + Unix Domain Socket (full-duplex):**
@@ -197,7 +197,7 @@ User / Agent / Script
 │Runner │ Manager   │
 │(pipe) │ (daemon)  │
 ├──────┴───────────┤
-│   Plugin Shim     │  ← SKILL.md parser + tsx/npx bridge
+│   Plugin Shim     │  ← SKILL.md parser + tsx bridge + local store
 ├──────────────────┤
 │ Cap. Discovery    │  ← introspect plugin → surface as tools
 ├──────────────────┤
@@ -220,9 +220,11 @@ User / Agent / Script
 - **Environment filtering:** `BuildEnv()` only passes safe env var prefixes (PATH, HOME, NODE_*, C2C_*) to plugin subprocesses — prevents credential leakage (AWS keys, GitHub tokens)
 - **File permissions:** All c2c directories created with 0700, log files with 0600 — blocks local user snooping on shared systems
 
-**Phase 2 — Runtime sandbox:**
-- macOS: `sandbox-exec` (userland, no root)
-- Linux: `seccomp-bpf` (lightweight syscall filtering, no root)
+**Runtime sandbox (implemented):**
+- macOS: `sandbox-exec` with `(allow default)` + selective deny (network blocked if not declared)
+- Linux: seccomp-bpf stub (placeholder)
+- Disable with `--no-sandbox` flag for debugging
+- Local package store: plugins installed to `~/.c2c/plugins/<name>/node_modules/` — zero network calls at runtime, conflicting transitive deps (openclaw, clawdbot, pi-ai) auto-cleaned after install
 
 ### 4.7 Storage Isolation
 
@@ -234,7 +236,7 @@ User / Agent / Script
   ├── pids/<name>.pid                # PID file (connectors only)
   ├── pids/<name>.json               # Metadata (connectors only)
   ├── logs/<name>.log                # Daemon logs (connectors only)
-  └── config.yaml                    # Global configuration
+  └── bin/tsx                         # Local tsx binary (TypeScript executor)
 ```
 
 ### 4.8 MCP Server
@@ -287,6 +289,8 @@ Go Daemon (process management + UDS)
 **Module path hijacking:** `NODE_PATH` injects `shim/node_modules/` containing:
 - `@openclaw/plugin-sdk/index.js` — main shim implementation
 - `openclaw/plugin-sdk/index.js` — re-exports `@openclaw/plugin-sdk`
+
+**Subpath wildcard exports:** OpenClaw SDK v2026.3.22 split into narrow subpath imports (`plugin-sdk/account-id`, `plugin-sdk/channel-runtime`, etc.). Our shim's `package.json` uses `"exports": { "./*": "./index.js" }` so any subpath resolves to the same main module. Future-proof — new upstream subpaths automatically work.
 
 **Runtime function classification:**
 
@@ -535,13 +539,13 @@ The shim's bridge functions wrap plugin internals into clean, agent-friendly ope
 - `c2c run` for skill-only plugins (currently only works via `connect` + `call`)
 - Plugin contribution guide + template
 - APT distribution (Linux)
-- Remove dead `internal/config` package + Viper dependency
+- [x] Removed dead `internal/config` package + Viper dependency (done in PR #1)
 
 ## 7. Design Decisions
 
 | Decision | Conclusion | Rationale |
 |----------|-----------|-----------|
-| Compatibility depth | Thin (os/exec + npx) | Fast ecosystem capture; rewriting is "heavy tax" |
+| Compatibility depth | Thin (os/exec + tsx + local store) | Fast ecosystem capture; rewriting is "heavy tax" |
 | Daemon mode | Self-managed processes (PID files) | Simplest cross-platform, no external deps |
 | MCP priority | Day 1 core feature | Primary consumers are Claude Code / Gemini CLI |
 | IPC | Pipe for control, UDS for data | Full-duplex + multi-consumer + reconnectable |

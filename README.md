@@ -89,7 +89,7 @@ Discovered 2 tool(s) for "wechat":
 | Command | Description |
 |---------|-------------|
 | `c2c run <skill> [args]` | Run a skill plugin (one-shot) |
-| `c2c connect <connector>` | Start a connector (foreground by default, `-b` for background) |
+| `c2c connect <connector>` | Start a connector (foreground by default, `-b` for background, `--no-sandbox` to disable OS sandbox) |
 | `c2c stop <connector>` | Stop a running connector |
 | `c2c attach <connector>` | Stream messages from a running connector |
 | `c2c echo <connector>` | Test consumer that echoes back received messages |

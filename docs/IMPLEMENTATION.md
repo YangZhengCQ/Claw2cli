@@ -36,9 +36,16 @@ Claw2Cli/
 │   ├── logs.go                      # c2c logs — tail daemon logs
 │   └── mcp.go                       # c2c mcp serve — MCP server
 ├── internal/
-│   ├── config/config.go             # Global config loading (~/.c2c/config.yaml)
+│   ├── store/
+│   │   ├── store.go                 # Local npm package management (per-plugin node_modules)
+│   │   └── tsx.go                   # tsx binary resolution and installation
+│   ├── sandbox/
+│   │   ├── sandbox.go               # Platform-agnostic sandbox interface
+│   │   ├── sandbox_darwin.go        # macOS sandbox-exec implementation
+│   │   ├── sandbox_linux.go         # Linux seccomp-bpf (placeholder)
+│   │   └── sandbox_other.go         # No-op for unsupported platforms
 │   ├── executor/
-│   │   ├── runner.go                # Skill subprocess runner (npx + timeout)
+│   │   ├── runner.go                # Skill subprocess runner (tsx + local store + timeout)
 │   │   ├── daemon.go                # Connector lifecycle (start/stop/attach/status)
 │   │   ├── permission.go            # Permission guard (pre-exec check)
 │   │   ├── environment.go           # Environment variable builder
@@ -257,7 +264,7 @@ Connects to UDS, sends command, waits for matching response by `id`.
 4. Register tools with `mcp-go` server
 5. Serve over stdio (JSON-RPC)
 
-Skill tools: receive `args` string → split → pass to npx subprocess
+Skill tools: receive `args` → resolve from local store → execute via tsx subprocess
 Connector tools (static): receive `action` string → dispatch to StartConnector/StopConnector/UDS forward
 Connector tools (dynamic): `registerDynamicTools()` queries each running connector via UDS `list_tools`, registers discovered tools with handlers that forward `invoke_tool` via `InvokeTool()`
 
@@ -280,9 +287,11 @@ Connector tools (dynamic): `registerDynamicTools()` queries each running connect
 | Function | File | Purpose |
 |----------|------|---------|
 | `ResolvePluginPackage(source)` | `internal/nodeutil/nodeutil.go` | Strip version + `-cli` suffix → runtime package name |
-| `ResolveNodeRunner()` | `internal/nodeutil/nodeutil.go` | Return `tsx` path (auto-install if needed), fallback `node` |
-| `ResolveGlobalNodeModules()` | `internal/nodeutil/nodeutil.go` | Find global npm node_modules directory |
-| `EnsurePluginInstalled(source)` | `internal/nodeutil/nodeutil.go` | Install CLI + runtime packages globally |
+| `store.New(name)` | `internal/store/store.go` | Create local package store for a plugin |
+| `store.Install(source)` | `internal/store/store.go` | Install packages locally to plugin's node_modules |
+| `store.CleanupReplacedPackages()` | `internal/store/store.go` | Remove openclaw/clawdbot/pi-ai from local deps |
+| `store.ResolveTsx()` | `internal/store/tsx.go` | Return local or global tsx binary path |
+| `sandbox.Apply(cmd, manifest, paths)` | `internal/sandbox/sandbox.go` | Apply OS-level sandbox to plugin subprocess |
 | `registry.Store(name, tools)` | `internal/registry/registry.go` | Cache tool schemas for a connector |
 | `registry.Get(name)` | `internal/registry/registry.go` | Get cached tool schemas for a connector |
 | `registry.GetAll()` | `internal/registry/registry.go` | Get tools from all active connectors |
@@ -300,23 +309,21 @@ Connector tools (dynamic): `registerDynamicTools()` queries each running connect
 
 ## 10. Test Coverage
 
-As of 2026-03-23 (Phase 1):
+As of 2026-03-27 (post PR #1 merge):
 
 | Package | Coverage |
 |---------|----------|
-| internal/config | 100.0% |
-| internal/registry | 100.0% |
-| internal/parser | 98.2% |
-| internal/protocol | 95.8% |
-| internal/paths | 95.7% |
-| internal/executor | 91.4% |
-| internal/mcp | 43.1% |
-| internal/nodeutil | 21.1% |
+| internal/registry | 94.1% |
+| internal/parser | 94.0% |
+| internal/protocol | 86.7% |
+| internal/executor | 82.0% |
+| internal/mcp | 69.2% |
+| internal/paths | 62.9% |
+| internal/nodeutil | 31.5% |
+| internal/store | 20.7% |
+| internal/sandbox | 0.0% |
 
 `cmd/` and `main.go` are excluded from coverage (CLI integration layer).
-
-Unreachable gaps:
-- `mcp/Serve`: calls `server.ServeStdio` which blocks on stdio
-- `paths/init`: `os.UserHomeDir()` error fallback unreachable in tests
+`internal/config` was removed in PR #1 (Viper dependency also removed).
 - `protocol/Encode`: `json.Marshal` error path unreachable with `Message` struct
 - `executor/isProcessRunning`: `os.FindProcess` error branch unreachable on Unix
