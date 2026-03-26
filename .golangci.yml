@@ -7,7 +7,3 @@ linters:
     - staticcheck
     - ineffassign
     - gosec
-
-run:
-  exclude-dirs:
-    - testdata
