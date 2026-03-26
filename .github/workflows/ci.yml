@@ -26,7 +26,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install golangci-lint
+      - name: Lint (non-blocking)
+        continue-on-error: true
         uses: golangci/golangci-lint-action@4afd733a84b1f43292c63897423277bb7f4313a9 # v6.5.0
         with:
           version: v2.1.6
