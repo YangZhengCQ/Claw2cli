@@ -1,0 +1,109 @@
+{
+  "language": "go",
+  "goVersion": "1.26.1",
+  "framework": null,
+  "docRoot": "docs/",
+  "hookStrictness": "warn",
+  "stalenessThresholdDays": 30,
+
+  "mappings": [
+    {
+      "source": "cmd/*.go",
+      "doc": "README.md#cli-reference",
+      "description": "CLI command definitions → README CLI Reference table"
+    },
+    {
+      "source": "internal/parser/types.go",
+      "doc": "docs/DESIGN.md#3-两类插件模型",
+      "description": "PluginManifest, SkillMetadata structs → Plugin model documentation"
+    },
+    {
+      "source": "internal/parser/skillmd.go",
+      "doc": "docs/DESIGN.md#skillmd-协议",
+      "description": "SKILL.md parser → SKILL.md protocol spec"
+    },
+    {
+      "source": "internal/parser/manifest.go",
+      "doc": "docs/DESIGN.md#46-安全模型分层防御",
+      "description": "manifest.yaml parser → Security model / manifest format"
+    },
+    {
+      "source": "internal/executor/runner.go",
+      "doc": "docs/DESIGN.md#42-兼容层策略薄兼容-thin-compatibility",
+      "description": "SkillRunner → Thin compatibility layer docs"
+    },
+    {
+      "source": "internal/executor/daemon.go",
+      "doc": "docs/DESIGN.md#44-连接型插件的守护进程模型",
+      "description": "ConnectorManager → Daemon process model docs"
+    },
+    {
+      "source": "internal/executor/permission.go",
+      "doc": "docs/DESIGN.md#46-安全模型分层防御",
+      "description": "Permission Guard → Security model docs"
+    },
+    {
+      "source": "internal/mcp/server.go",
+      "doc": "docs/DESIGN.md#48-mcp-serverday-1-特性",
+      "description": "MCP Server → MCP integration docs"
+    },
+    {
+      "source": "internal/mcp/converter.go",
+      "doc": "docs/DESIGN.md#48-mcp-serverday-1-特性",
+      "description": "ManifestToTool converter → MCP tool mapping docs"
+    },
+    {
+      "source": "internal/protocol/messages.go",
+      "doc": "docs/DESIGN.md#43-js-go-桥接通道",
+      "description": "NDJSON message types → Protocol spec"
+    },
+    {
+      "source": "internal/protocol/codec.go",
+      "doc": "docs/DESIGN.md#43-js-go-桥接通道",
+      "description": "NDJSON encoder/decoder → Protocol spec"
+    },
+    {
+      "source": "internal/paths/paths.go",
+      "doc": "docs/DESIGN.md#47-凭证与存储隔离",
+      "description": "Directory layout → Storage isolation docs"
+    },
+    {
+      "source": "internal/config/config.go",
+      "doc": null,
+      "description": "Config loading — NO DOC COVERAGE"
+    },
+    {
+      "source": "cmd/install.go",
+      "doc": "README.md#quick-start",
+      "description": "Install command → Quick Start guide"
+    },
+    {
+      "source": "internal/mcp/deps.go",
+      "doc": null,
+      "description": "Test dependency injection — internal, no doc needed"
+    },
+    {
+      "source": "internal/executor/deps.go",
+      "doc": null,
+      "description": "Test dependency injection — internal, no doc needed"
+    }
+  ],
+
+  "exclude": [
+    "testdata/**",
+    "**/*_test.go",
+    "**/deps.go",
+    "main.go",
+    ".claude/**",
+    "coverage.out",
+    "coverage.html"
+  ],
+
+  "coverageGaps": [
+    {
+      "source": "internal/config/config.go",
+      "exports": ["C2CConfig", "Load"],
+      "suggestion": "Add config file format documentation to README or DESIGN.md"
+    }
+  ]
+}

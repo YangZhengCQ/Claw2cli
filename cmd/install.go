@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"crypto/sha512"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,13 +11,14 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/nodeutil"
-	"github.com/user/claw2cli/internal/parser"
-	"github.com/user/claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/paths"
+	"github.com/YangZhengCQ/Claw2cli/internal/store"
 	"gopkg.in/yaml.v3"
 )
 
 var pluginType string
+var skipVerify bool
 
 var installCmd = &cobra.Command{
 	Use:   "install <package>",
@@ -29,9 +33,14 @@ var installCmd = &cobra.Command{
 
 func init() {
 	installCmd.Flags().StringVar(&pluginType, "type", "skill", "Plugin type: skill or connector")
+	installCmd.Flags().BoolVar(&skipVerify, "skip-verify", false, "Skip checksum verification (not recommended)")
 }
 
 func installPlugin(source, pType string) error {
+	if pType != "skill" && pType != "connector" {
+		return fmt.Errorf("invalid plugin type %q: must be 'skill' or 'connector'", pType)
+	}
+
 	// Pre-flight: check that node and npm are available
 	if err := checkNodeNpm(); err != nil {
 		return err
@@ -49,19 +58,30 @@ func installPlugin(source, pType string) error {
 
 	// Derive plugin name from source
 	name := derivePluginName(source)
+	if err := paths.ValidateName(name); err != nil {
+		return fmt.Errorf("invalid plugin name derived from %q: %w", source, err)
+	}
+
+	// Check for existing plugin with the same name
+	pluginDir := paths.PluginDir(name)
+	if _, err := os.Stat(pluginDir); err == nil {
+		return fmt.Errorf("plugin %q already exists — uninstall it first or choose a different name", name)
+	}
 
 	fmt.Printf("Installing %q as %q (%s)...\n", source, name, pType)
 
 	// Get package info and checksum from npm
-	checksum, err := nodeutil.GetNpmChecksum(source)
+	checksum, err := getNpmChecksum(source)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not get checksum: %v\n", err)
+		if !skipVerify {
+			return fmt.Errorf("could not verify package integrity: %w\n  To install without verification, use: c2c install --skip-verify %s", err, source)
+		}
+		fmt.Fprintf(os.Stderr, "Warning: skipping integrity verification: %v\n", err)
 		checksum = ""
 	}
 
 	// Create plugin directory
-	pluginDir := paths.PluginDir(name)
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+	if err := os.MkdirAll(pluginDir, 0700); err != nil {
 		return fmt.Errorf("create plugin dir: %w", err)
 	}
 
@@ -87,7 +107,7 @@ func installPlugin(source, pType string) error {
 	}
 
 	manifestPath := filepath.Join(pluginDir, "manifest.yaml")
-	if err := os.WriteFile(manifestPath, manifestData, 0644); err != nil {
+	if err := os.WriteFile(manifestPath, manifestData, 0600); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 
@@ -96,12 +116,22 @@ func installPlugin(source, pType string) error {
 		return fmt.Errorf("create storage dir: %w", err)
 	}
 
-	// For connectors, pre-install the npm package globally so `c2c connect` starts faster
-	if pType == "connector" {
-		fmt.Printf("Pre-installing npm package globally...\n")
-		if err := preInstallPackage(source); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: pre-install failed (will retry on connect): %v\n", err)
-		}
+	// Install packages locally
+	s := store.New(name)
+	resolvedVersion, integrity, err := s.Install(source)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: local install failed (will retry on connect): %v\n", err)
+	} else {
+		// Update manifest with resolved version and integrity
+		manifest.ResolvedVersion = resolvedVersion
+		manifest.Integrity = integrity
+		manifestData, _ = yaml.Marshal(manifest)
+		os.WriteFile(manifestPath, manifestData, 0600)
+	}
+
+	// Ensure tsx is available
+	if _, err := store.EnsureTsx(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not install tsx: %v\n", err)
 	}
 
 	fmt.Printf("Installed %q.\n", name)
@@ -140,38 +170,6 @@ func checkShimFiles() error {
 	return nil
 }
 
-// preInstallPackage runs `npm install -g` to cache both the CLI wrapper
-// and the actual runtime plugin package ahead of time.
-func preInstallPackage(source string) error {
-	// Install the source package (CLI wrapper)
-	cmd := exec.Command("npm", "install", "-g", source)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-
-	// Also install the runtime plugin if different (e.g. strip -cli suffix)
-	runtimePkg := nodeutil.ResolvePluginPackage(source)
-	stripVersion := source
-	if strings.HasPrefix(stripVersion, "@") {
-		if idx := strings.LastIndex(stripVersion, "@"); idx > 0 {
-			stripVersion = stripVersion[:idx]
-		}
-	}
-	if runtimePkg != "" && runtimePkg != stripVersion {
-		fmt.Printf("Pre-installing runtime package: %s\n", runtimePkg)
-		cmd2 := exec.Command("npm", "install", "-g", runtimePkg)
-		cmd2.Stdout = os.Stderr
-		cmd2.Stderr = os.Stderr
-		if err := cmd2.Run(); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // derivePluginName extracts a short name from an npm package specifier.
 // "@tencent-weixin/openclaw-weixin-cli@latest" -> "wechat"
 // "@scope/name@version" -> "name"
@@ -203,3 +201,32 @@ func derivePluginName(source string) string {
 	return s
 }
 
+// getNpmChecksum runs `npm info` to get the package's shasum.
+func getNpmChecksum(source string) (string, error) {
+	// Query npm info for the exact package spec (including version if specified)
+	out, err := exec.Command("npm", "info", source, "--json").Output()
+	if err != nil {
+		return "", err
+	}
+
+	var info struct {
+		Dist struct {
+			Shasum   string `json:"shasum"`
+			Integrity string `json:"integrity"`
+		} `json:"dist"`
+	}
+	if err := json.Unmarshal(out, &info); err != nil {
+		return "", err
+	}
+
+	if info.Dist.Integrity != "" {
+		return info.Dist.Integrity, nil
+	}
+	if info.Dist.Shasum != "" {
+		return "sha1:" + info.Dist.Shasum, nil
+	}
+
+	// Fallback: compute our own hash from the npm info output
+	h := sha512.Sum512(out)
+	return "sha512:" + hex.EncodeToString(h[:]), nil
+}

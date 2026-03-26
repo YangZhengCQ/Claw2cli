@@ -21,10 +21,12 @@ type SkillMetadata struct {
 
 // PluginManifest is parsed from c2c's own manifest.yaml.
 type PluginManifest struct {
-	Source      string       `yaml:"source"`
-	Type        PluginType   `yaml:"type"`
-	Permissions []Permission `yaml:"permissions"`
-	Checksum    string       `yaml:"checksum"`
+	Source          string       `yaml:"source"`
+	Type            PluginType   `yaml:"type"`
+	Permissions     []Permission `yaml:"permissions"`
+	Checksum        string       `yaml:"checksum"`
+	ResolvedVersion string       `yaml:"resolved_version,omitempty"`
+	Integrity       string       `yaml:"integrity,omitempty"`
 
 	// Populated at runtime, not serialized to YAML.
 	Skill       *SkillMetadata `yaml:"-"`

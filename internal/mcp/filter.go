@@ -1,6 +1,6 @@
 package mcp
 
-import "github.com/user/claw2cli/internal/parser"
+import "github.com/YangZhengCQ/Claw2cli/internal/parser"
 
 // FilterPlugins returns only the plugins that match the given filter criteria.
 // If both skills and connectors are nil/empty, all plugins are returned.

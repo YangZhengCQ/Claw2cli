@@ -4,14 +4,15 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/executor"
-	"github.com/user/claw2cli/internal/protocol"
+	"github.com/YangZhengCQ/Claw2cli/internal/executor"
+	"github.com/YangZhengCQ/Claw2cli/internal/protocol"
 )
 
 var listTools bool
@@ -67,13 +68,16 @@ func init() {
 	callCmd.Flags().IntVar(&callTimeout, "timeout", 30, "Timeout in seconds")
 }
 
-func queryListTools(conn interface{ Read([]byte) (int, error) }, name, reqID string) error {
-	writer := conn.(interface{ Write([]byte) (int, error) })
-
+func queryListTools(conn net.Conn, name, reqID string) error {
 	// Send list_tools command
 	msg := protocol.NewCommand("c2c-call", "list_tools", reqID, nil)
-	data, _ := json.Marshal(msg)
-	writer.Write(append(data, '\n'))
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshal command: %w", err)
+	}
+	if _, err := conn.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("write command: %w", err)
+	}
 
 	return readResponse(conn, reqID, func(payload json.RawMessage) error {
 		var dp protocol.DiscoveryPayload
@@ -111,16 +115,22 @@ func queryListTools(conn interface{ Read([]byte) (int, error) }, name, reqID str
 	})
 }
 
-func invokeToolCall(conn interface{ Read([]byte) (int, error) }, name, reqID, toolName string, toolArgs json.RawMessage) error {
-	writer := conn.(interface{ Write([]byte) (int, error) })
-
-	payload, _ := json.Marshal(map[string]interface{}{
+func invokeToolCall(conn net.Conn, name, reqID, toolName string, toolArgs json.RawMessage) error {
+	payload, err := json.Marshal(map[string]interface{}{
 		"tool": toolName,
 		"args": json.RawMessage(toolArgs),
 	})
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
 	msg := protocol.NewCommand("c2c-call", "invoke_tool", reqID, payload)
-	data, _ := json.Marshal(msg)
-	writer.Write(append(data, '\n'))
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshal command: %w", err)
+	}
+	if _, err := conn.Write(append(data, '\n')); err != nil {
+		return fmt.Errorf("write command: %w", err)
+	}
 
 	return readResponse(conn, reqID, func(payload json.RawMessage) error {
 		// Pretty-print the result
@@ -135,7 +145,7 @@ func invokeToolCall(conn interface{ Read([]byte) (int, error) }, name, reqID, to
 	})
 }
 
-func readResponse(conn interface{ Read([]byte) (int, error) }, reqID string, onResult func(json.RawMessage) error) error {
+func readResponse(conn net.Conn, reqID string, onResult func(json.RawMessage) error) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
@@ -160,6 +170,10 @@ func readResponse(conn interface{ Read([]byte) (int, error) }, reqID string, onR
 				resultCh <- fmt.Errorf("[%s] %s", msg.Code, msg.MessageStr)
 				return
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			resultCh <- fmt.Errorf("read error: %w", err)
+			return
 		}
 		resultCh <- fmt.Errorf("connection closed before response")
 	}()

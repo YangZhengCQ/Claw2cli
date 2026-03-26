@@ -122,10 +122,15 @@ async function main() {
   sendLog(pluginName, "info", `Channel ${channel.id} registered`);
 
   // Check for existing accounts
-  const accounts = listAccounts(channel, config);
+  let accounts = listAccounts(channel, config);
   if (accounts.length === 0) {
     sendLog(pluginName, "info", "No accounts configured, starting QR login...");
     await startLogin(channel, config);
+    // Re-fetch accounts after login so newly-authenticated accounts are picked up
+    accounts = listAccounts(channel, config);
+    if (accounts.length === 0) {
+      sendLog(pluginName, "warn", "No accounts available after login. Gateway will not start.");
+    }
   }
 
   // Start the gateway for each account

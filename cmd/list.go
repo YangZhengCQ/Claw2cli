@@ -2,11 +2,12 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/executor"
-	"github.com/user/claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/executor"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 )
 
 var listCmd = &cobra.Command{
@@ -23,7 +24,10 @@ var listCmd = &cobra.Command{
 			return nil
 		}
 
-		connectors, _ := executor.ListConnectors()
+		connectors, err := executor.ListConnectors()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not list connectors: %v\n", err)
+		}
 		runningSet := map[string]int{}
 		for _, c := range connectors {
 			if c.Running {
@@ -36,6 +40,7 @@ var listCmd = &cobra.Command{
 		for _, name := range plugins {
 			manifest, err := parser.LoadPlugin(name)
 			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: skipping plugin %q: %v\n", name, err)
 				continue
 			}
 			status := "-"

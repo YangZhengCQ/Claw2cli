@@ -2,26 +2,26 @@ package executor
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/user/claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/paths"
 )
 
-func TestBuildNpxArgs(t *testing.T) {
-	args := buildNpxArgs("@test/plugin@1.0.0", []string{"--query", "hello"})
-	expected := []string{"-y", "@test/plugin@1.0.0", "--query", "hello"}
-
-	if len(args) != len(expected) {
-		t.Fatalf("args length=%d, want %d", len(args), len(expected))
-	}
-	for i, a := range args {
-		if a != expected[i] {
-			t.Errorf("args[%d]=%q, want %q", i, a, expected[i])
-		}
-	}
+// setupFakeStore creates a fake plugin node_modules directory so that
+// store.New(name).IsInstalled() returns true during tests.
+func setupFakeStore(t *testing.T, name string) {
+	t.Helper()
+	dir := t.TempDir()
+	paths.SetBaseDir(dir)
+	nm := filepath.Join(dir, "plugins", name, "node_modules")
+	os.MkdirAll(nm, 0700)
+	os.WriteFile(filepath.Join(nm, ".package-lock.json"), []byte("{}"), 0600)
 }
 
 func TestBuildEnv(t *testing.T) {
@@ -84,6 +84,7 @@ func connectorManifestNoNetwork() *parser.PluginManifest {
 }
 
 func TestRunSkill_JSONStdout(t *testing.T) {
+	setupFakeStore(t, "test-skill")
 	orig := execCommandCtx
 	defer func() { execCommandCtx = orig }()
 	execCommandCtx = fakeExecCommandCtx(`echo '{"result":"ok"}'`)
@@ -101,6 +102,7 @@ func TestRunSkill_JSONStdout(t *testing.T) {
 }
 
 func TestRunSkill_PlainStdout(t *testing.T) {
+	setupFakeStore(t, "test-skill")
 	orig := execCommandCtx
 	defer func() { execCommandCtx = orig }()
 	execCommandCtx = fakeExecCommandCtx(`echo "hello world"`)
@@ -118,6 +120,7 @@ func TestRunSkill_PlainStdout(t *testing.T) {
 }
 
 func TestRunSkill_NonZeroExit(t *testing.T) {
+	setupFakeStore(t, "test-skill")
 	orig := execCommandCtx
 	defer func() { execCommandCtx = orig }()
 	execCommandCtx = fakeExecCommandCtx(`echo "fail" >&2; exit 1`)
@@ -145,6 +148,7 @@ func TestRunSkill_PermissionDenied(t *testing.T) {
 }
 
 func TestRunSkill_DefaultTimeout(t *testing.T) {
+	setupFakeStore(t, "test-skill")
 	orig := execCommandCtx
 	defer func() { execCommandCtx = orig }()
 	execCommandCtx = fakeExecCommandCtx(`echo "ok"`)
@@ -160,6 +164,7 @@ func TestRunSkill_DefaultTimeout(t *testing.T) {
 }
 
 func TestRunSkill_Timeout(t *testing.T) {
+	setupFakeStore(t, "test-skill")
 	orig := execCommandCtx
 	defer func() { execCommandCtx = orig }()
 	execCommandCtx = fakeExecCommandCtx(`sleep 30`)
@@ -174,6 +179,7 @@ func TestRunSkill_Timeout(t *testing.T) {
 }
 
 func TestRunSkill_CommandError(t *testing.T) {
+	setupFakeStore(t, "test-skill")
 	orig := execCommandCtx
 	defer func() { execCommandCtx = orig }()
 	// Return a command for a nonexistent binary
@@ -191,6 +197,7 @@ func TestRunSkill_CommandError(t *testing.T) {
 }
 
 func TestRunSkill_JSONArray(t *testing.T) {
+	setupFakeStore(t, "test-skill")
 	orig := execCommandCtx
 	defer func() { execCommandCtx = orig }()
 	execCommandCtx = fakeExecCommandCtx(`echo '[1,2,3]'`)
@@ -205,6 +212,7 @@ func TestRunSkill_JSONArray(t *testing.T) {
 }
 
 func TestRunSkill_InvalidJSON(t *testing.T) {
+	setupFakeStore(t, "test-skill")
 	orig := execCommandCtx
 	defer func() { execCommandCtx = orig }()
 	execCommandCtx = fakeExecCommandCtx(`echo '{invalid json'`)

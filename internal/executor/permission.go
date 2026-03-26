@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/user/claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 )
 
-// CheckPermissions validates that a plugin has the required permissions.
-// Returns an error if any declared permission is not recognized or if
-// a connector lacks essential permissions.
+// CheckPermissions validates that a plugin declares recognized permissions.
+// NOTE: Permissions are currently advisory only — they are syntax-checked
+// but not enforced at the OS level. Plugins run with the full privileges
+// of the current user. Real sandboxing (landlock, sandbox-exec) is planned.
 func CheckPermissions(manifest *parser.PluginManifest) error {
 	if manifest.Type == parser.PluginTypeConnector {
 		// Connectors must declare network permission

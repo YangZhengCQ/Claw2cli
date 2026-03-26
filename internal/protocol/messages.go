@@ -1,6 +1,9 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // MessageType identifies the kind of NDJSON message.
 type MessageType string
@@ -12,6 +15,9 @@ const (
 	TypeError     MessageType = "error"
 	TypeLog       MessageType = "log"
 	TypeDiscovery MessageType = "discovery"
+	TypePing      MessageType = "ping"
+	TypePong      MessageType = "pong"
+	TypeShutdown  MessageType = "shutdown"
 )
 
 // Message is the NDJSON envelope for all c2c IPC communication.
@@ -50,6 +56,7 @@ func NewEvent(source, topic string, payload json.RawMessage) *Message {
 		Source:  source,
 		Topic:   topic,
 		Payload: payload,
+		Ts:      time.Now().Unix(),
 	}
 }
 
@@ -61,6 +68,7 @@ func NewCommand(source, action, id string, payload json.RawMessage) *Message {
 		Action:  action,
 		ID:      id,
 		Payload: payload,
+		Ts:      time.Now().Unix(),
 	}
 }
 
@@ -71,6 +79,7 @@ func NewResponse(source, id string, payload json.RawMessage) *Message {
 		Source:  source,
 		ID:      id,
 		Payload: payload,
+		Ts:      time.Now().Unix(),
 	}
 }
 
@@ -81,6 +90,7 @@ func NewError(source, code, message string) *Message {
 		Source:     source,
 		Code:       code,
 		MessageStr: message,
+		Ts:         time.Now().Unix(),
 	}
 }
 
@@ -91,6 +101,7 @@ func NewLog(source, level, message string) *Message {
 		Source:     source,
 		Level:      level,
 		MessageStr: message,
+		Ts:         time.Now().Unix(),
 	}
 }
 
@@ -107,11 +118,36 @@ type DiscoveryPayload struct {
 }
 
 // NewDiscovery creates a discovery message carrying tool schemas.
+// Returns nil if the tools cannot be marshaled (should not happen in practice).
 func NewDiscovery(source string, tools []ToolSchema) *Message {
-	payload, _ := json.Marshal(DiscoveryPayload{Tools: tools})
+	payload, err := json.Marshal(DiscoveryPayload{Tools: tools})
+	if err != nil {
+		return nil
+	}
 	return &Message{
 		Type:    TypeDiscovery,
 		Source:  source,
 		Payload: payload,
+		Ts:      time.Now().Unix(),
+	}
+}
+
+// NewPing creates a ping message for readiness checks.
+func NewPing(source, id string) *Message {
+	return &Message{
+		Type:   TypePing,
+		Source: source,
+		ID:     id,
+		Ts:     time.Now().Unix(),
+	}
+}
+
+// NewPong creates a pong response to a ping.
+func NewPong(source, id string) *Message {
+	return &Message{
+		Type:   TypePong,
+		Source: source,
+		ID:     id,
+		Ts:     time.Now().Unix(),
 	}
 }

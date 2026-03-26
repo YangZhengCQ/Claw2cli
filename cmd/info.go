@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/executor"
-	"github.com/user/claw2cli/internal/parser"
-	"github.com/user/claw2cli/internal/protocol"
+	"github.com/YangZhengCQ/Claw2cli/internal/executor"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/protocol"
 )
 
 var infoCmd = &cobra.Command{
@@ -77,14 +78,23 @@ func queryDiscoveredTools(name string) []protocol.ToolSchema {
 
 	reqID := fmt.Sprintf("info-%d", time.Now().UnixNano())
 	msg := protocol.NewCommand("c2c-info", "list_tools", reqID, nil)
-	data, _ := json.Marshal(msg)
-	conn.Write(append(data, '\n'))
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return nil
+	}
+	if _, err := conn.Write(append(data, '\n')); err != nil {
+		return nil
+	}
 
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
 	deadline := time.After(3 * time.Second)
-	resultCh := make(chan []protocol.ToolSchema, 1)
+	type discoverResult struct {
+		tools []protocol.ToolSchema
+		err   error
+	}
+	resultCh := make(chan discoverResult, 1)
 
 	go func() {
 		for scanner.Scan() {
@@ -92,10 +102,14 @@ func queryDiscoveredTools(name string) []protocol.ToolSchema {
 			if json.Unmarshal(scanner.Bytes(), &resp) != nil {
 				continue
 			}
+			if resp.ID == reqID && resp.Type == protocol.TypeError {
+				resultCh <- discoverResult{err: fmt.Errorf("[%s] %s", resp.Code, resp.MessageStr)}
+				return
+			}
 			if resp.ID == reqID && resp.Type == protocol.TypeResponse {
 				var dp protocol.DiscoveryPayload
 				if json.Unmarshal(resp.Payload, &dp) == nil {
-					resultCh <- dp.Tools
+					resultCh <- discoverResult{tools: dp.Tools}
 				}
 				return
 			}
@@ -103,8 +117,12 @@ func queryDiscoveredTools(name string) []protocol.ToolSchema {
 	}()
 
 	select {
-	case tools := <-resultCh:
-		return tools
+	case r := <-resultCh:
+		if r.err != nil {
+			fmt.Fprintf(os.Stderr, "warning: tool discovery failed: %v\n", r.err)
+			return nil
+		}
+		return r.tools
 	case <-deadline:
 		return nil
 	}

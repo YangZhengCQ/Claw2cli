@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/executor"
+	"github.com/YangZhengCQ/Claw2cli/internal/executor"
 )
 
 var statusCmd = &cobra.Command{

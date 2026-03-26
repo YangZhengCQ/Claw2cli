@@ -1,0 +1,67 @@
+{
+  "enabled": true,
+  "projectStack": "go",
+  "goVersion": "1.26.1",
+  "packageManager": "go modules",
+
+  "testCommand": "go test -race ./...",
+  "coverageCommand": "go test -coverprofile=coverage.out -covermode=atomic ./internal/...",
+  "coverageSummaryPath": "coverage.out",
+  "coverageFuncCommand": "go tool cover -func=coverage.out",
+  "coverageHtmlCommand": "go tool cover -html=coverage.out -o coverage.html",
+  "mutationCommand": null,
+
+  "thresholds": {
+    "lines": 100,
+    "functions": 100,
+    "branches": 100,
+    "statements": 100
+  },
+
+  "policy": {
+    "testFirst": true,
+    "noSkipTests": true,
+    "noTestDeletion": true,
+    "requireBehaviorTests": true,
+    "rejectWiringOnlyTests": true,
+    "coverageRatchet": true,
+    "failOnCoverageDrop": true
+  },
+
+  "blockCommitWithoutFreshGate": true,
+  "gateFreshnessMinutes": 120,
+  "smartStaleness": true,
+
+  "excludeFromCoverage": [
+    "main.go",
+    "cmd/"
+  ],
+
+  "currentCoverage": {
+    "total": 82.5,
+    "packages": {
+      "internal/config": 100.0,
+      "internal/registry": 100.0,
+      "internal/parser": 98.2,
+      "internal/protocol": 95.8,
+      "internal/paths": 95.7,
+      "internal/executor": 90.9,
+      "internal/mcp": 43.1,
+      "internal/nodeutil": 35.9
+    },
+    "updatedAt": "2026-03-24"
+  },
+
+  "remainingGaps": {
+    "mcp/Serve": "0% - calls server.ServeStdio which blocks on stdio",
+    "mcp/DiscoverTools": "0% - requires running UDS daemon",
+    "mcp/InvokeTool": "0% - requires running UDS daemon",
+    "nodeutil/ResolveNodeRunner": "0% - calls exec.LookPath and npm install",
+    "nodeutil/EnsurePluginInstalled": "0% - calls npm list/install",
+    "nodeutil/GetNpmChecksum": "0% - calls npm info",
+    "paths/init": "unreachable os.UserHomeDir error fallback",
+    "protocol/Encode": "unreachable json.Marshal error path"
+  },
+
+  "notes": "Coverage ratchet baseline updated 2026-03-24. 8 internal packages. cmd/ excluded (CLI wiring). Test and production code must be written together — no skipping allowed."
+}

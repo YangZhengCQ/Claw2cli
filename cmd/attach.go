@@ -8,7 +8,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/executor"
+	"github.com/YangZhengCQ/Claw2cli/internal/executor"
 )
 
 var attachCmd = &cobra.Command{
@@ -36,8 +36,12 @@ var attachCmd = &cobra.Command{
 		go func() {
 			defer close(doneCh)
 			scanner := bufio.NewScanner(conn)
+			scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 			for scanner.Scan() {
 				fmt.Println(scanner.Text())
+			}
+			if err := scanner.Err(); err != nil {
+				fmt.Fprintf(os.Stderr, "read error: %v\n", err)
 			}
 		}()
 

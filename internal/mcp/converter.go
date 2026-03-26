@@ -2,7 +2,7 @@ package mcp
 
 import (
 	gomcp "github.com/mark3labs/mcp-go/mcp"
-	"github.com/user/claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 )
 
 // ManifestToTool converts a PluginManifest into an MCP Tool definition.

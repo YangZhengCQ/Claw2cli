@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/user/claw2cli/internal/executor"
-	"github.com/user/claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/executor"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 )
 
 var backgroundMode bool
@@ -50,5 +50,5 @@ Use --background (-b) to run as a background daemon instead.`,
 
 func init() {
 	connectCmd.Flags().BoolVarP(&backgroundMode, "background", "b", false, "Run as background daemon")
-	connectCmd.Flags().BoolVar(&skipVerify, "skip-verify", false, "Skip checksum verification")
+	connectCmd.Flags().BoolVar(&noSandbox, "no-sandbox", false, "Disable OS-level sandboxing")
 }

@@ -5,8 +5,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/user/claw2cli/internal/executor"
-	"github.com/user/claw2cli/internal/parser"
+	"github.com/YangZhengCQ/Claw2cli/internal/executor"
+	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 )
 
 // Package-level function pointers for dependency injection in tests.
