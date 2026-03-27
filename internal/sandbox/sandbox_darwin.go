@@ -48,10 +48,7 @@ func isUnsafeFsPath(p string) bool {
 			return true
 		}
 	}
-	if strings.Contains(clean, "..") {
-		return true
-	}
-	return false
+	return strings.Contains(clean, "..")
 }
 
 func generateProfile(manifest *parser.PluginManifest, spaths SandboxPaths) string {
