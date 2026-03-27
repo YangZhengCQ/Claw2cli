@@ -30,15 +30,17 @@ jobs:
         run: go vet ./...
 
       - name: Lint
-        run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.1.6
-          golangci-lint run --timeout=5m
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.1.6
+          args: --timeout=5m
 
       - name: Test
         run: go test -race -count=1 -timeout 120s ./...
 
       - name: Shim tests
-        run: cd shim && node --test test/*.test.js
+        run: cd shim && node --test test/sdk.test.js test/subpath.test.js test/auth.test.js test/shim-fixes.test.js
+        timeout-minutes: 2
 
       - name: Coverage
         run: |
