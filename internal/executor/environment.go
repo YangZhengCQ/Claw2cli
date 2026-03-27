@@ -50,6 +50,7 @@ var sensitiveEnvVars = []string{
 	"NPM_TOKEN=",
 	"NPM_CONFIG__AUTHTOKEN=",
 	"NODE_OPTIONS=",
+	"NODE_EXTRA_CA_CERTS=",
 }
 
 func isSafeEnvVar(e string) bool {

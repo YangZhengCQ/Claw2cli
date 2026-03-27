@@ -201,6 +201,7 @@ function listAccounts(channel, config) {
     try {
       return channel.config.listAccountIds(config);
     } catch (e) {
+      sendLog(pluginName, "warn", `Failed to list accounts (listAccountIds threw): ${e.message}`);
       return [];
     }
   }
@@ -232,6 +233,11 @@ async function startLogin(channel, config) {
 // ---------------------------------------------------------------------------
 // Run
 // ---------------------------------------------------------------------------
+
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
+  sendLog(pluginName, "error", `Unhandled rejection: ${msg}`);
+});
 
 main().catch((err) => {
   sendLog(pluginName, "error", `Fatal: ${err.message}\n${err.stack}`);

@@ -88,7 +88,7 @@ func GetNpmChecksum(source string) (string, error) {
 		pkg = pkg[:idx]
 	}
 
-	out, err := exec.Command("npm", "info", pkg, "--json").Output()
+	out, err := execCommandFn("npm", "info", pkg, "--json").Output()
 	if err != nil {
 		return "", err
 	}
@@ -145,7 +145,7 @@ func EnsurePluginInstalled(source string) error {
 		cmd := execCommandFn("npm", "list", "-g", pkg, "--depth=0")
 		if err := cmd.Run(); err != nil {
 			log.Printf("Installing plugin package: %s", pkg)
-			install := execCommandFn("npm", "install", "-g", pkg)
+			install := execCommandFn("npm", "install", "--ignore-scripts", "-g", pkg)
 			install.Stdout = os.Stderr
 			install.Stderr = os.Stderr
 			if err := install.Run(); err != nil {

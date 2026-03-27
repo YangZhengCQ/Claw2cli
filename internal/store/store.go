@@ -3,11 +3,13 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/YangZhengCQ/Claw2cli/internal/nodeutil"
 	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 	"github.com/YangZhengCQ/Claw2cli/internal/paths"
 )
@@ -85,7 +87,10 @@ func (s *Store) Install(source string) (resolvedVersion, integrity string, err e
 	s.CleanupReplacedPackages()
 
 	// Get integrity hash
-	integrity, _ = getIntegrity(source)
+	integrity, integrityErr := getIntegrityFn(source)
+	if integrityErr != nil {
+		log.Printf("warning: failed to fetch integrity hash for %s: %v", source, integrityErr)
+	}
 
 	return resolvedVersion, integrity, nil
 }
@@ -118,7 +123,7 @@ func (s *Store) Verify(manifest *parser.PluginManifest) error {
 		return nil // no integrity to check
 	}
 
-	currentHash, err := getIntegrity(manifest.Source)
+	currentHash, err := getIntegrityFn(manifest.Source)
 	if err != nil {
 		return fmt.Errorf("verify integrity: %w", err)
 	}
@@ -142,18 +147,8 @@ func resolveVersion(source string) (string, error) {
 	return version, nil
 }
 
-// getIntegrity queries npm for the package's integrity hash.
-func getIntegrity(source string) (string, error) {
-	out, err := execCommandFn("npm", "view", source, "dist.integrity", "--json").Output()
-	if err != nil {
-		return "", err
-	}
-	var hash string
-	if err := json.Unmarshal(out, &hash); err != nil {
-		return strings.TrimSpace(string(out)), nil
-	}
-	return hash, nil
-}
+// getIntegrityFn is the function used to fetch integrity hashes. Swappable for testing.
+var getIntegrityFn = nodeutil.GetNpmChecksum
 
 // stripVersion removes version suffix from a package spec.
 func stripVersion(source string) string {

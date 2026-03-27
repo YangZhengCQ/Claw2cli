@@ -1,6 +1,6 @@
 # Claw2Cli Implementation Guide
 
-> Last updated: 2026-03-23
+> Last updated: 2026-03-28
 
 ## Table of Contents
 
@@ -42,7 +42,7 @@ Claw2Cli/
 │   ├── sandbox/
 │   │   ├── sandbox.go               # Platform-agnostic sandbox interface
 │   │   ├── sandbox_darwin.go        # macOS sandbox-exec implementation
-│   │   ├── sandbox_linux.go         # Linux seccomp-bpf (placeholder)
+│   │   ├── sandbox_linux.go         # Linux sandbox (stub — landlock/seccomp planned)
 │   │   └── sandbox_other.go         # No-op for unsupported platforms
 │   ├── executor/
 │   │   ├── runner.go                # Skill subprocess runner (tsx + local store + timeout)
@@ -95,16 +95,27 @@ make clean          # rm -f c2c coverage.out
 2. checkShimFiles()       — verify c2c-shim.js and fake SDK exist
 3. paths.EnsureDirs()     — create ~/.c2c/{plugins,storage,sockets,pids}
 4. derivePluginName()     — "@tencent-weixin/openclaw-weixin-cli@latest" → "wechat"
-5. getNpmChecksum()       — fetch SHA-512 integrity hash from npm registry
+5. nodeutil.GetNpmChecksum() — fetch SHA-512 integrity hash from npm registry
 6. Write manifest.yaml    — source, type, permissions, checksum
 7. paths.EnsureStorageDir — create ~/.c2c/storage/<name>/ with 0700
-8. preInstallPackage()    — npm install -g (both CLI wrapper and runtime package)
+8. store.Install()        — npm install --ignore-scripts locally (both CLI wrapper and runtime package)
 ```
+
+**Security:** All `npm install` commands use `--ignore-scripts` to prevent supply-chain attacks
+via malicious `postinstall` scripts. Conflicting transitive deps (`openclaw`, `clawdbot`, `@mariozechner`)
+are auto-cleaned after install since the shim replaces them at runtime.
+
+**Flags:**
+- `--skip-verify` — skip npm integrity verification (use when registry is unreachable)
+- `--type connector|skill` — override auto-detected plugin type
+
+**Retry behavior:** If local `npm install` fails during `c2c install`, the error is non-fatal
+(warning printed). The install is retried automatically on the first `c2c connect`.
 
 **CLI vs runtime package resolution** (`resolvePluginPackage()`):
 - Strip version suffix: `@scope/name@version` → `@scope/name`
 - Strip `-cli` suffix: `@scope/name-cli` → `@scope/name`
-- Both packages are installed globally for fast `connect` startup
+- Both packages are installed locally to `~/.c2c/plugins/<name>/node_modules/`
 
 ## 4. Connector Lifecycle
 
@@ -173,6 +184,14 @@ process.stdout.on("error", (err) => {
   }
 });
 ```
+
+**Stdin close handling (2026-03-28):**
+When the Go daemon crashes or shuts down, `rl.on("close")` rejects all pending requests
+immediately instead of waiting for their 5-minute timeouts. This prevents memory leaks
+from accumulated unresolved Promises.
+
+**Error separation:** The `rl.on("line")` catch block distinguishes `SyntaxError` (malformed
+JSON — silently ignored) from other errors (handler bugs — logged via `sendLog`).
 
 **Key shim function — `dispatchReplyFromConfig`:**
 1. `sendEvent("message.received", {from, body, ...})` — notify Go side
@@ -274,13 +293,24 @@ Connector tools (dynamic): `registerDynamicTools()` queries each running connect
 
 | Plugin | Tools | Type | Notes |
 |--------|-------|------|-------|
-| WeChat (`@tencent-weixin/openclaw-weixin-cli`) | 2 | Channel | send_text, send_media. Full E2E verified. |
+| WeChat (`@tencent-weixin/openclaw-weixin-cli`) | 2 | Channel | send_text, send_media. Full E2E verified (sandbox + local store, 2026-03-28). |
 | Feishu (`@larksuite/openclaw-lark`) | 27 | Channel + OAPI | calendar, task, bitable, im, chat, doc, wiki, drive, search, OAuth |
 | QQ Bot (`@tencent-connect/openclaw-qqbot`) | 3 | Channel + OAPI | send_text, send_media, remind |
 | WeCom (`@wecom/wecom-openclaw-plugin`) | 3 | Channel + MCP | send_text, send_media, wecom_mcp (HTTP MCP bridge) |
 | Web Search (`@ollama/openclaw-web-search`) | 2 | Skill-only | ollama_web_search, ollama_web_fetch. No channel, stays alive for tool calls. |
 | Tavily (`openclaw-tavily`) | 5 | Skill-only | Idle without API key. Loads successfully. |
 | DingTalk (`@dingtalk-real-ai/dingtalk-connector`) | — | — | Blocked by upstream dep bug (not c2c) |
+
+**E2E verification (2026-03-28):** WeChat connector tested with all hardening features active:
+
+| Feature | Verification |
+|---------|-------------|
+| Local package store | Loaded from `~/.c2c/plugins/wechat/node_modules/`, no global npm at runtime |
+| Sandbox | `sandbox-exec` applied (no "sandbox not available" warning) |
+| Integrity check | `c2c update wechat` detected checksum change and re-installed |
+| Tool discovery | 2 tools registered (send_text, send_media) + 5 agent hints |
+| Account startup | Existing account `3ffc51ae8b27_im_bot` started, WeChat long-poll connected |
+| Graceful shutdown | SIGTERM → 9s grace → SIGKILL (WeChat long-poll holds the process past grace period) |
 
 ## 9. Key Functions Reference
 
@@ -301,6 +331,9 @@ Connector tools (dynamic): `registerDynamicTools()` queries each running connect
 | `ValidateName(name)` | `internal/paths/paths.go` | Reject path-traversal in plugin names |
 | `BuildEnv(manifest)` | `internal/executor/environment.go` | Build filtered env vars for plugin subprocess |
 | `CheckPermissions(manifest)` | `internal/executor/permission.go` | Pre-exec permission guard |
+| `GetNpmChecksum(source)` | `internal/nodeutil/nodeutil.go` | Fetch package integrity hash from npm registry (canonical — used by install + store) |
+| `sandbox.Cleanup()` | `internal/sandbox/sandbox.go` | Remove temp sandbox profile after command exits |
+| `rotateLogIfNeeded(path)` | `internal/executor/daemon.go` | Rotate log file if >10MB (keeps one `.1` backup) |
 | `checkNodeNpm()` | `cmd/install.go` | Pre-flight: verify node/npm on PATH |
 | `checkShimFiles()` | `cmd/install.go` | Pre-flight: verify shim files exist |
 | `shimDir()` | `cmd/daemon.go` | Locate shim directory relative to binary |
@@ -309,21 +342,36 @@ Connector tools (dynamic): `registerDynamicTools()` queries each running connect
 
 ## 10. Test Coverage
 
-As of 2026-03-27 (post grill fixes + TDD tests):
+As of 2026-03-28 (post grill report fixing plan — 22 of 25 items completed):
 
-| Package | Coverage |
-|---------|----------|
-| internal/registry | 94.1% |
-| internal/parser | 94.0% |
-| internal/executor | 87.6% |
-| internal/protocol | 86.7% |
-| internal/mcp | 79.6% |
-| internal/paths | 62.9% |
-| internal/sandbox | 57.9% |
-| internal/store | 48.9% |
-| internal/nodeutil | 31.5% |
+| Package | Coverage | Notes |
+|---------|----------|-------|
+| internal/registry | 94.1% | |
+| internal/parser | 94.0% | |
+| internal/executor | 88.0% | +0.4 — log rotation tests |
+| internal/protocol | 86.7% | |
+| internal/mcp | 80.0% | +0.4 — goroutine leak fix + read deadline |
+| internal/nodeutil | 71.2% | +39.7 — GetNpmChecksum, ResolveNodeRunner, EnsurePluginInstalled |
+| internal/paths | 66.7% | +3.8 — initBaseDir fail-fast tests |
+| internal/store | 64.4% | +15.5 — Verify tests (getIntegrity delegated to nodeutil) |
+| internal/sandbox | 58.1% | +0.2 — Cleanup + writeTempProfile tests |
+| **Total** | **80.4%** | **+5.9 from 74.5%** |
+
+**JS shim tests:** 4 test files, 39 tests total (auth 25, sdk 2, subpath 4, shim-fixes 8).
 
 `cmd/` and `main.go` are excluded from coverage (CLI integration layer).
-`internal/config` was removed in PR #1 (Viper dependency also removed).
+
+**Remaining uncoverable paths:**
 - `protocol/Encode`: `json.Marshal` error path unreachable with `Message` struct
 - `executor/isProcessRunning`: `os.FindProcess` error branch unreachable on Unix
+- `mcp/Serve`: blocks on stdio — needs integration test
+- `nodeutil/ResolveNodeRunner` interactive path: requires terminal simulation
+
+**Checksum consolidation (2026-03-28):**
+- `cmd/install.go:getNpmChecksum` → removed, calls `nodeutil.GetNpmChecksum`
+- `internal/store/store.go:getIntegrity` → one-liner delegating to `nodeutil.GetNpmChecksum`
+- `nodeutil.GetNpmChecksum` is the canonical single source of truth
+
+**Tool-discovery consolidation (2026-03-28):**
+- `cmd/info.go:queryDiscoveredTools` → 5-line wrapper calling `mcp.DiscoverTools`
+- `mcp.DiscoverTools` is the canonical implementation

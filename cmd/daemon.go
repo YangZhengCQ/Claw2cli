@@ -237,7 +237,9 @@ func runDaemon(name string) error {
 			// Cache discovery messages in tool registry
 			if msg.Type == protocol.TypeDiscovery {
 				var dp protocol.DiscoveryPayload
-				if json.Unmarshal(msg.Payload, &dp) == nil && len(dp.Tools) > 0 {
+				if err := json.Unmarshal(msg.Payload, &dp); err != nil {
+					log.Printf("warning: failed to unmarshal discovery payload: %v", err)
+				} else if len(dp.Tools) > 0 {
 					existing := registry.Get(name)
 					registry.Store(name, append(existing, dp.Tools...))
 					if isForeground {
@@ -396,6 +398,9 @@ func runDaemon(name string) error {
 			return fmt.Errorf("shim exited unexpectedly: %w", err)
 		}
 	}
+
+	// Clean up sandbox temp files
+	sandbox.Cleanup()
 
 	// Evict discovered tools on shutdown
 	registry.Delete(name)

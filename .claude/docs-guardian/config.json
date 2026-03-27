@@ -68,11 +68,6 @@
       "description": "Directory layout → Storage isolation docs"
     },
     {
-      "source": "internal/config/config.go",
-      "doc": null,
-      "description": "Config loading — NO DOC COVERAGE"
-    },
-    {
       "source": "cmd/install.go",
       "doc": "README.md#quick-start",
       "description": "Install command → Quick Start guide"
@@ -99,11 +94,5 @@
     "coverage.html"
   ],
 
-  "coverageGaps": [
-    {
-      "source": "internal/config/config.go",
-      "exports": ["C2CConfig", "Load"],
-      "suggestion": "Add config file format documentation to README or DESIGN.md"
-    }
-  ]
+  "coverageGaps": []
 }

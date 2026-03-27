@@ -9,6 +9,8 @@
 
 > Bring your own Skills, we provide the Secure Runtime.
 > 把 OpenClaw 插件变成标准 CLI 工具。无 Docker，无浏览器，只需一个二进制。
+>
+> 最后更新：2026-03-28
 
 ## 为什么
 
@@ -100,6 +102,7 @@ Discovered 2 tool(s) for "wechat":
 | `c2c list` | 列出已安装插件 |
 | `c2c info <plugin>` | 查看插件详情（运行中时显示已发现工具） |
 | `c2c install <package>` | 安装 OpenClaw 插件 |
+| `c2c update [plugin]` | 更新已安装插件到最新版本 |
 | `c2c mcp serve` | 启动 MCP 服务器（自动包含已发现工具） |
 
 ## 能力发现

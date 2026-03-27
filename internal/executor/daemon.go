@@ -58,11 +58,12 @@ func StartConnector(manifest *parser.PluginManifest) error {
 		Setsid: true, // Create new session, detach from terminal
 	}
 
-	// Redirect daemon stdout/stderr to log file
+	// Redirect daemon stdout/stderr to log file (with size-based rotation)
 	logPath := filepath.Join(paths.BaseDir(), "logs", manifest.Name+".log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
 		return fmt.Errorf("create log directory: %w", err)
 	}
+	rotateLogIfNeeded(logPath)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return fmt.Errorf("open log file: %w", err)
@@ -314,6 +315,21 @@ func isProcessRunning(pid int) bool {
 	// On Unix, FindProcess always succeeds. Send signal 0 to check.
 	err = process.Signal(syscall.Signal(0))
 	return err == nil
+}
+
+// maxLogSize is the maximum log file size before rotation (10 MB).
+const maxLogSize = 10 * 1024 * 1024
+
+// rotateLogIfNeeded rotates the log file if it exceeds maxLogSize.
+// Keeps one previous log as <name>.log.1.
+func rotateLogIfNeeded(logPath string) {
+	info, err := os.Stat(logPath)
+	if err != nil || info.Size() < maxLogSize {
+		return
+	}
+	prevPath := logPath + ".1"
+	os.Remove(prevPath)
+	os.Rename(logPath, prevPath)
 }
 
 // cleanupConnectorFiles removes PID, metadata, and socket files for a connector.

@@ -13,10 +13,20 @@ var baseDir string
 func init() {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: $HOME not set, using current directory for c2c data\n")
-		home = "."
+		fmt.Fprintf(os.Stderr, "error: $HOME not set — c2c requires a home directory for data storage\n")
+		os.Exit(1)
 	}
 	baseDir = filepath.Join(home, ".c2c")
+}
+
+// initBaseDir sets baseDir from the given home directory. Returns error if home is empty.
+// Extracted from init() for testability.
+func initBaseDir(home string) error {
+	if home == "" {
+		return fmt.Errorf("home directory is empty — c2c requires a home directory for data storage")
+	}
+	baseDir = filepath.Join(home, ".c2c")
+	return nil
 }
 
 // ShimDir returns the path to the shim directory bundled with the c2c binary.

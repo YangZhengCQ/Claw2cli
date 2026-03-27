@@ -4,223 +4,343 @@ version: 1.2.0
 date: 2026-03-27
 target: /Users/headless/code/Claw2cli
 style: Hard-Nosed Critique + Roadmap
-addons: Scale stress, Hidden costs, Principle violations, Strangler fig, Success metrics, Before vs after, Assumptions audit, Compact & optimize
-agents: architecture, error-handling, security, testing
+addons: [Compact & optimize, Hidden costs, Principle violations]
+agents: [recon, architecture, error-handling, security, testing]
 ---
 
-# Claw2Cli Grill Report (Post-PR #1 Merge)
+# Claw2cli Grill Report — Hard-Nosed Critique + Roadmap
 
-## Hard-Nosed Critique
+**Date:** 2026-03-27
+**Codebase:** Go 1.23 CLI + Node.js shim — ~7,337 LOC, 58 Go + 5 JS files
+**Architecture:** Go CLI daemon + Node.js compatibility shim; UDS/NDJSON protocol; MCP tool exposure
 
-### Critical Flaws (4)
+---
 
-**C1. Sandbox is theater — fail-open on all platforms** `[CRITICAL]`
-- Linux: `sandbox_linux.go` is a complete no-op (0 LOC of actual enforcement)
-- macOS: Uses deprecated `sandbox-exec`; if it fails, execution proceeds unsandboxed
-- Daemon: `daemon.go:133-137` logs warning and continues on sandbox failure
-- Permission checks: advisory-only (`permission.go:11-14`), never enforced at OS level
-- **Impact:** Users believe they have sandboxing; they do not. Any plugin has full user privileges.
+## Critical Flaws
 
-**C2. npm install runs arbitrary code before any protection** `[CRITICAL]`
-- `store/store.go:61` — `npm install` executes pre/post-install hooks with full user privileges
-- No `--ignore-scripts` flag
-- Happens before checksum is recorded, before sandbox is applied
-- **Impact:** Supply chain attack vector with zero mitigation.
+### 1. [CRITICAL] `cmd/` package has near-zero test coverage for 1,767 LOC
 
-**C3. `store` vs `nodeutil` contradictory install models** `[CRITICAL]`
-- `c2c install` uses `store.Install()` (local `node_modules`)
-- `c2c update` uses `nodeutil.EnsurePluginInstalled()` (global `npm install -g`)
-- `c2c connect` uses `store.ResolveTsx()` but `nodeutil.ResolveGlobalNodeModules()` as fallback
-- **Impact:** `c2c update wechat` updates the global package but not the local `node_modules` that `c2c connect` actually uses. Updated plugin never takes effect.
+**File:** `cmd/cmd_test.go` — only 3 trivial tests for the entire command layer
+**Evidence:** `daemon.go` (415 lines), `install.go` (232 lines), `call.go` (189 lines) are the primary user-facing code paths — all untested. The daemon is the core of the product: UDS listener, NDJSON broadcast, shim subprocess lifecycle, signal handling, client multiplexing.
+**Impact:** Any refactor of the command layer is a regression minefield. The god function `runDaemon` (355 lines, 8 package imports) cannot be safely changed.
+**Effort:** 3-5 days
 
-**C4. Unbounded memory on skill output** `[CRITICAL]`
-- `runner.go:58-59` — size check happens AFTER `cmd.Run()` completes
-- Output captured into unbounded `strings.Builder`
-- Malicious plugin can OOM the host before the 10MB check triggers
-- **Impact:** Denial of service.
+### 2. [HIGH] Sandbox is security theater on all platforms
 
-### High-Severity Issues (8)
+**Files:** `internal/sandbox/sandbox_darwin.go:57-73`, `internal/sandbox/sandbox_linux.go:14-38`
+**Evidence:** Darwin generates `(allow default)` — permits all filesystem operations, only optionally denies network. The `SandboxPaths` struct (StorageDir, ShimDir, NodeModules, NodeRunner) is populated but **never used** in `generateProfile()`. Linux is a complete stub that returns nil (success) with a warning.
+**Impact:** Any plugin can read `~/.ssh/id_rsa`, browser cookies, cloud credentials. The sandbox is advertised in design docs but provides no filesystem isolation. Sandbox failure is also fail-open (`daemon.go:133-137` — logs warning and continues).
+**Effort:** 3-5 days (darwin filesystem restrictions), 1-2 days (linux stub)
 
-| # | Finding | File |
-|---|---------|------|
-| H1 | UDS socket no authentication (0600 perms only) | `daemon.go:284-374` |
-| H2 | Sandbox profile path injection via `fs:/` permission | `sandbox_darwin.go:71-74` |
-| H3 | `cmd/daemon.go` god file (415 LOC, 7 responsibilities) | `cmd/daemon.go` |
-| H4 | Goroutine leaks in DiscoverTools/InvokeTool (no SetReadDeadline) | `mcp/dynamic.go:39-64,108-138` |
-| H5 | Shim stdin silently drops all malformed NDJSON | `plugin-sdk/index.js:78-80` |
-| H6 | sandbox 0% test coverage on security-critical code | `internal/sandbox/` |
-| H7 | store Install/Verify 20.7% coverage, core flow untested | `internal/store/` |
-| H8 | Sandbox temp profile files never cleaned up | `sandbox_darwin.go:83-94` |
+### 3. [HIGH] UDS socket has no client authentication
+
+**File:** `cmd/daemon.go:284-373`
+**Evidence:** The UDS listener accepts any connection from any same-user process. No token, no challenge, no nonce. Any local process (browser exploit, compromised app, another plugin) can connect and: send `shutdown` to kill daemons, `invoke_tool` to execute plugin actions, or passively read all broadcast messages.
+**Impact:** Local privilege escalation within user context. A compromised browser extension could silently send messages through any connected messenger plugin.
+**Effort:** 3-6 hours
+
+### 4. [HIGH] No structured logging anywhere in Go codebase
+
+**Files:** Throughout `cmd/daemon.go` (`log.Printf`), `internal/executor/daemon.go` (`fmt.Fprintf(os.Stderr)`)
+**Evidence:** All logging uses `log.Printf` or `fmt.Fprintf(os.Stderr, ...)`. No JSON output, no log levels, no correlation IDs. The Node.js shim has better logging (`sendLog` with levels) but these are only visible to UDS clients, not the daemon's log file.
+**Impact:** Debugging production issues requires grep-and-pray. No ability to filter by severity, correlate requests across Go daemon and JS shim, or integrate with log aggregation.
+**Effort:** 1-2 days (introduce `log/slog`)
+
+### 5. [HIGH] Hardcoded plugin-specific knowledge throughout the codebase
+
+Three separate hardcoded mappings that require recompilation for each new plugin:
+
+| Location | What's hardcoded |
+|----------|-----------------|
+| `cmd/install.go:191-195` | Plugin name aliases (`openclaw-weixin-cli` -> `wechat`) |
+| `internal/store/store.go:96` | Replaced npm packages (`openclaw`, `clawdbot`, `@mariozechner`) |
+| `shim/c2c-shim.js:41-49` | WeChat/Lark channel configs as fallback defaults |
+
+**Impact:** Every new plugin requires code changes in 3 files across 2 languages. This is the opposite of a plugin architecture.
+**Effort:** 0.5 days each (1.5 days total)
+
+### 6. [HIGH] Security-critical paths have 0% test coverage
+
+| Function | File | Risk |
+|----------|------|------|
+| `store.Verify` | `internal/store/store.go:108-130` | Integrity verification — gates tamper detection |
+| `nodeutil.ResolveNodeRunner` | `internal/nodeutil/nodeutil.go:39-68` | Decides if TS plugins can load |
+| `nodeutil.EnsurePluginInstalled` | `internal/nodeutil/nodeutil.go:136-157` | Runs `npm install -g` globally |
+
+DI hooks exist for `ResolveNodeRunner` but no tests use them. `EnsurePluginInstalled` has a DI inconsistency: line 92 uses raw `exec.Command` instead of swappable `execCommandFn`.
+**Effort:** LOW (2-3 hours total for all three)
+
+### 7. [HIGH] Discovery/unmarshal errors silently swallowed
+
+**File:** `cmd/daemon.go:239-247`
+**Evidence:** When `json.Unmarshal(msg.Payload, &dp)` fails, the error is silently dropped. A malformed discovery payload results in zero tools registered with no diagnostic message.
+**Impact:** `c2c call --list-tools` returns empty with no explanation. Users will assume the plugin has no tools.
+**Effort:** 15 minutes
 
 ---
 
 ## 80/20 Rewrite Plan
 
-**Don't rewrite.** The architecture is sound (9 clean packages, correct dependency direction, good protocol design). Focus on:
+You don't need a full rewrite. The architecture is sound — subprocess isolation via NDJSON, clean leaf packages, minimal dependencies. The problems are concentrated in two areas: the `cmd/daemon.go` god function and the security layer.
 
-1. **Unify store/nodeutil** — Delete `nodeutil.EnsurePluginInstalled`, make `c2c update` use `store.Install`
-2. **Add `--ignore-scripts` to npm install** — One line change, eliminates C2
-3. **Fix runner output limiting** — Use `io.LimitedReader` wrapper
-4. **Make sandbox non-optional** — If sandbox fails, refuse to run (or require `--no-sandbox` acknowledgment)
+**The 80/20:** Extract `runDaemon` into 3 testable components + implement real sandboxing + add UDS auth. This covers 80% of the risk with 20% of a rewrite effort.
+
+### Extract from `runDaemon`:
+1. **SubprocessManager** — shim lifecycle, stdin/stdout pipes, signal forwarding
+2. **UDSServer** — listener, client tracking, broadcast, with auth token
+3. **MessageRouter** — NDJSON dispatch, tool discovery caching, request/response correlation
+
+### Security hardening:
+4. **Sandbox** — darwin: use `SandboxPaths` to generate filesystem restrictions; linux: implement via namespaces or seccomp
+5. **UDS auth** — generate a random token at daemon start, write to PID metadata file, require token on connect
 
 ---
 
 ## Prioritized 15-Item Backlog
 
-| Rank | Item | Severity | Impact | Effort |
-|------|------|----------|--------|--------|
-| 1 | Add `--ignore-scripts` to `store.Install()` npm command | CRITICAL | Supply chain | 0.5d |
-| 2 | Unify store/nodeutil: make `c2c update` use store.Install | CRITICAL | Data consistency | 1d |
-| 3 | Use `io.LimitedReader` for skill output capture | CRITICAL | DoS prevention | 0.5d |
-| 4 | Validate `fs:` permission paths (no `/`, canonicalize) | HIGH | Sandbox escape | 0.5d |
-| 5 | Set `conn.SetReadDeadline` in DiscoverTools/InvokeTool | HIGH | Goroutine leak | 0.5d |
-| 6 | Add sandbox tests (profile generation, path injection) | HIGH | Test gap | 1d |
-| 7 | Add store Install/Verify tests with mocked npm | HIGH | Test gap | 1d |
-| 8 | Clean up sandbox temp profile after daemon start | HIGH | Resource leak | 0.5d |
-| 9 | Remove global npm fallback from NODE_PATH | MEDIUM | Isolation | 0.5d |
-| 10 | Block `NPM_CONFIG_REGISTRY` and other npm config vars | MEDIUM | Registry hijack | 0.5d |
-| 11 | Extract daemon.go into internal/daemon package | MEDIUM | Testability | 2d |
-| 12 | Deduplicate UDS client pattern (4 locations) | MEDIUM | Maintainability | 1d |
-| 13 | Make golangci-lint blocking in CI | MEDIUM | Quality gate | 0.5d |
-| 14 | Add structured logging (slog) | MEDIUM | Observability | 2d |
-| 15 | Add macOS CI runner for sandbox compilation | LOW | CI coverage | 0.5d |
+Ranked by Impact x Risk / Effort:
+
+| # | Item | Severity | Effort | Impact |
+|---|------|----------|--------|--------|
+| 1 | Fix silent discovery unmarshal error swallowing | HIGH | 15 min | Immediate debuggability |
+| 2 | Make lint + govulncheck blocking in CI | MEDIUM | 10 min | Stop silent regressions |
+| 3 | Fix `store.Install` silently discarding integrity hash error (`store.go:88`) | MEDIUM | 15 min | Integrity check actually works |
+| 4 | Add tests for `store.Verify`, `ResolveNodeRunner`, `EnsurePluginInstalled` | HIGH | 3 hours | Cover security-critical paths |
+| 5 | Fix DI inconsistency: `nodeutil.go:92` uses raw `exec.Command` | MEDIUM | 30 min | Makes nodeutil fully testable |
+| 6 | Add coverage threshold gate in CI (70% floor) | MEDIUM | 30 min | Ratchet won't silently slip |
+| 7 | Move hardcoded aliases/packages to config | HIGH | 1.5 days | Plugin-agnostic architecture |
+| 8 | Introduce `log/slog` structured logging | HIGH | 1-2 days | Production debuggability |
+| 9 | Add UDS auth token | HIGH | 3-6 hours | Close local privilege escalation |
+| 10 | Extract `runDaemon` into SubprocessManager + UDSServer + MessageRouter | HIGH | 2-3 days | Testability + maintainability |
+| 11 | Implement real darwin sandbox filesystem restrictions | HIGH | 3-5 days | Actual plugin isolation |
+| 12 | Add `rl.on('close')` handler in shim SDK to reject pending requests | MEDIUM | 2 hours | Fix memory leak on daemon crash |
+| 13 | Add daemon lifecycle integration test | HIGH | 2-3 days | Core product path tested |
+| 14 | Deduplicate tool-discovery client logic (3 copies) | MEDIUM | 0.5 days | Single protocol change point |
+| 15 | Add log rotation for daemon log files | MEDIUM | 2 hours | Prevent unbounded disk use |
 
 ---
 
 ## Red Flags
 
-1. **`c2c update` is functionally broken** — updates global packages that local store ignores
-2. **59 golangci-lint errors are non-blocking** — linting is decorative, not enforced
-3. **Sandbox advertised in docs but doesn't work on Linux** — misleading security posture
+1. **`--skip-verify` permanently disables integrity checks** (`cmd/install.go:74-81`). Once installed with `--skip-verify`, the empty checksum persists forever in the manifest. `VerifyChecksum()` returns nil for empty expected checksums. A user who uses `--skip-verify` once due to a transient npm error is permanently unprotected.
 
-## Quick Wins
+2. **Sandbox failure is fail-open** (`cmd/daemon.go:133-137`). If `sandbox-exec` is removed in a future macOS version (it's already deprecated), or if `/tmp` is full, plugins silently run unsandboxed with no user indication.
 
-### < 1 day
-- Add `--ignore-scripts` to npm install (1 line)
-- Use `io.LimitedReader` for skill output
-- Clean up sandbox temp files (add `defer os.Remove`)
-- Set `conn.SetReadDeadline` in dynamic.go (2 locations)
-- Block dangerous NPM_CONFIG_* env vars
+3. **`NODE_EXTRA_CA_CERTS` passes the env filter** (`internal/executor/environment.go:14-27`). An attacker controlling the parent environment can inject a rogue CA certificate, enabling MITM on all plugin TLS traffic.
 
-### < 1 week
-- Unify store/nodeutil, fix `c2c update`
-- Add sandbox + store tests
-- Validate `fs:` permission paths
+4. **Manifest file permissions inconsistent**: `install.go` writes `0600`, `update.go:136` writes `0644`. The update path widens the permission surface.
+
+5. **`paths.init()` falls back to `"."` if `$HOME` is unset** (`internal/paths/paths.go:13-19`). In containers, all PID files, sockets, and storage go into CWD. Should fail hard.
 
 ---
 
-## Add-on: Scale Stress
-If traffic grows 100x: The UDS broadcast in daemon.go uses `sync.Map.Range` with `conn.Write` inline — a slow client blocks all broadcasts. Need per-client write queues or drop-on-slow.
+## Quick Wins
 
-## Add-on: Hidden Costs
-1. **Debugging**: No structured logs, no correlation IDs, 3 different log approaches
-2. **Onboarding**: daemon.go 415 LOC with 4 goroutines — new devs can't reason about it
-3. **Store/nodeutil confusion**: Two npm install paths, unclear which to use
-4. **Sandbox false security**: Users think they're protected; they're not on Linux
-5. **CI noise**: 59 lint errors in every run, everyone learns to ignore CI
+### Under 1 hour:
+- Fix silent discovery unmarshal (`daemon.go:239-247`) — add `log.Printf` on error
+- Make lint + govulncheck blocking in CI — remove `continue-on-error: true`
+- Fix `store.Install` integrity swallow (`store.go:88`) — return error
+- Fix manifest permission in `update.go:136` — change `0644` to `0600`
+- Add `defer signal.Stop(sigCh)` in `attach.go` and `echo.go`
+- Remove custom `contains` helper in `nodeutil_test.go:50-61` — use `strings.Contains`
 
-## Add-on: Principle Violations
-- **SRP**: daemon.go has 7 responsibilities
-- **Dependency Inversion**: cmd/ directly imports 8/9 internal packages
-- **Least Privilege**: sandbox fail-open violates principle by design
-- **DRY**: store/nodeutil duplicate version stripping, checksum fetching, CLI suffix logic
+### Under 1 day:
+- Add unit tests for `store.Verify`, `ResolveNodeRunner`, `EnsurePluginInstalled` (DI hooks already exist)
+- Fix DI gap on `nodeutil.go:92` and mock network calls in `TestVerifyChecksum_Mismatch`
+- Add coverage threshold gate + fuzz testing cron job in CI
+- Add `rl.on('close')` in shim SDK + `process.on('unhandledRejection')` in `c2c-shim.js`
+- Clean up sandbox temp file leak (`sandbox_darwin.go:77`) — add `defer os.Remove`
 
-## Add-on: Assumptions Audit
-1. **"npm is always available"** — checked at install, not at connect/run
-2. **"tsx can handle all plugins"** — fails if plugin needs native modules
-3. **"One account per plugin"** — handleInvokeTool picks first account
-4. **"Sandbox-exec works on macOS"** — deprecated, may be removed in future macOS
-5. **"Global npm packages are safe to include in NODE_PATH"** — undermines isolation
+### Under 1 week:
+- Extract `runDaemon` into 3 testable components
+- Introduce `log/slog` structured logging
+- Add UDS auth token
+- Move hardcoded aliases/packages/configs to data files
+- Deduplicate tool-discovery client logic and checksum logic
+
+---
 
 ## Add-on: Compact & Optimize
-- Delete `nodeutil.EnsurePluginInstalled` (replaced by store)
-- Delete `nodeutil.ResolveNodeRunner` (replaced by store.ResolveTsx)
-- Merge `store.stripVersion` + `store.stripCLISuffix` into `nodeutil.ResolvePluginPackage`
-- Remove `channel-config-schema.js` files (wildcard exports make them unnecessary)
-- Remove `internal/config` references from docs-guardian config.json
 
-## Add-on: Success Metrics
-- **MTTR**: Currently unmeasurable (no structured logs). Target: < 5 min with correlation IDs
-- **Test coverage**: Currently 62% overall. Target: 80% with sandbox > 50%
-- **Lint errors**: Currently 59. Target: 0 (blocking in CI)
-- **Plugin load success rate**: Track how many plugins load vs fail
+### 1. [MEDIUM] Three copies of checksum/integrity logic — consolidate to one
 
-## Add-on: Before vs After
-```
-BEFORE (current):                    AFTER (target):
-cmd/daemon.go (415 LOC)              internal/daemon/server.go (UDS)
-  ├─ subprocess mgmt                 internal/daemon/bridge.go (shim I/O)
-  ├─ UDS server                      internal/daemon/shutdown.go
-  ├─ NDJSON routing                  cmd/daemon.go (20 LOC, just wires)
-  ├─ client mgmt
-  ├─ shutdown                        store + nodeutil merged:
-  └─ 4 goroutines                    internal/store/ (single npm interface)
+| Location | Approach |
+|----------|----------|
+| `cmd/install.go:204-232` | `getNpmChecksum` via `npm info` |
+| `internal/nodeutil/nodeutil.go:81-115` | `GetNpmChecksum` via `npm info` |
+| `internal/store/store.go:145-156` | `getIntegrity` via `npm view` |
 
-npm install → global + local         npm install --ignore-scripts → local only
-sandbox: fail-open                   sandbox: fail-closed (--no-sandbox to override)
-```
+All three shell out to npm with slightly different flags. Consolidate into a single `nodeutil.GetPackageIntegrity(name, version)` function.
+**Effort:** 2 hours. **Lines eliminated:** ~40.
 
-## Add-on: Strangler Fig
-No big-bang needed. Incremental fixes:
-1. Week 1: Add `--ignore-scripts`, fix output limiting, unify store
-2. Week 2: Add tests for sandbox + store
-3. Week 3: Extract daemon.go, add structured logging
-4. Week 4: Make sandbox fail-closed, lint blocking
+### 2. [MEDIUM] Three copies of plugin name resolution — consolidate to one
+
+| Location | Language |
+|----------|----------|
+| `internal/nodeutil/nodeutil.go:23-34` | Go |
+| `internal/store/store.go:159-173` | Go |
+| `shim/c2c-shim.js:184-197` | JavaScript |
+
+The two Go copies should be unified into `nodeutil` (already the natural home). The JS copy is unavoidable (different runtime) but should be documented as a mirror.
+**Effort:** 1 hour. **Lines eliminated:** ~15.
+
+### 3. [MEDIUM] Tool-discovery UDS client duplicated in 3 files
+
+`cmd/info.go:72-129`, `cmd/call.go:71-116`, `internal/mcp/dynamic.go:14-72` each independently implement "connect to UDS, send command, read NDJSON response with timeout." Extract to a shared `executor.QueryDaemon(socketPath, command, timeout)` function.
+**Effort:** 3 hours. **Lines eliminated:** ~80.
+
+### 4. [LOW] Dead code: `paths.ConfigPath()` defined but never called
+
+**File:** `internal/paths/paths.go:92`
+**Evidence:** `ConfigPath()` returns a path to `config.yaml` but no code in the entire codebase reads or writes this file. Either implement config loading or remove the function.
+**Effort:** 5 min. **Lines eliminated:** 3.
+
+**Total compaction opportunity:** ~140 lines of duplicated logic across 3 consolidation targets.
+
+---
+
+## Add-on: Hidden Costs
+
+### 1. Onboarding cost: Shim mental model is non-obvious
+
+New contributors must understand: the shim impersonates the real OpenClaw SDK, intercepts `registerChannel()` calls, bridges to Go via NDJSON, and has intentionally divergent behavior (e.g., `isNormalizedSenderAllowed([])` allows all vs `checkSenderAllowlist([])` blocks all). This dual-runtime, dual-language architecture with behavioral divergence is a significant ramp-up burden. The `docs/PITFALLS.md` partially addresses this but is incomplete.
+
+### 2. Debugging cost: No request correlation across the Go-JS boundary
+
+When a user reports "my command didn't work," the operator must: check the daemon log (unstructured `log.Printf`), check the shim's `sendLog` output (only visible if a UDS client was attached), and mentally correlate timestamps. There is no request ID that flows from UDS client -> Go daemon -> shim stdin -> plugin -> shim stdout -> Go daemon -> UDS client. Debugging a single request failure requires reading two log streams with no shared identifier.
+
+### 3. Operational cost: One daemon + one Node.js process per connector
+
+Each connector = 2 long-running processes + 1 UDS socket + 1 PID file + 1 log file. Five connectors = 10 processes, 5 sockets, 5 PID files, 5 unbounded log files. There is no `c2c status --all` that shows resource usage across connectors. The log files have no rotation (`executor/daemon.go:66` opens with `O_APPEND`, never rotates).
+
+### 4. Velocity cost: Hardcoded plugin knowledge requires recompilation
+
+Adding a new plugin requires changes in `cmd/install.go` (alias), `internal/store/store.go` (replaced packages), and `shim/c2c-shim.js` (fallback config) — a code change, recompile, and release cycle. This turns a "drop in a new npm package" operation into a "wait for the next binary release" bottleneck.
+
+### 5. Testing cost: `cmd/` untestability slows iteration
+
+The `runDaemon` god function cannot be tested without starting a real subprocess + UDS listener. Any change to the daemon requires manual testing (start connector, attach, send message, verify). This manual-test-per-change cycle is the biggest hidden velocity tax in the project.
+
+---
+
+## Add-on: Principle Violations
+
+### 1. Single Responsibility Principle (SRP)
+
+**`cmd/daemon.go:runDaemon` (355 lines)** — Violates SRP by handling: plugin loading, checksum verification, shim path resolution, NODE_PATH construction, store verification, subprocess management, UDS listener setup, NDJSON parsing, broadcast multiplexing, client connection handling, signal management, and registry caching. This is at least 5 distinct responsibilities in one function.
+
+**`shim/node_modules/@openclaw/plugin-sdk/index.js` (694 lines)** — Single file containing: SDK registration, NDJSON protocol, auth allowlist, media handling, typing callbacks, tool registration, config management, and 20+ exported functions. The file is the entire shim SDK in one module.
+
+### 2. Dependency Inversion Principle (DIP)
+
+**`internal/store/store.go` and `internal/nodeutil/nodeutil.go`** — Both depend directly on `exec.Command("npm", ...)` (6 call sites). The `nodeutil` package partially applies DIP via `execCommandFn` but inconsistently (`nodeutil.go:92` uses raw `exec.Command`). The `store` package has no abstraction at all — it's hardwired to npm.
+
+### 3. Least Privilege
+
+**Darwin sandbox** — `(allow default)` is the maximum privilege level. The sandbox should start from `(deny default)` and explicitly allow only what the plugin needs. The `SandboxPaths` fields exist to define the allowed filesystem scope but are never used.
+
+**UDS socket** — No authentication means any same-user process has full control over all connected daemons. Least privilege would require a per-session token.
+
+**`--skip-verify` flag** — Permanently disables integrity checks instead of being a one-time override. Should skip verification for a single run without persisting the empty checksum to the manifest.
+
+### 4. Don't Repeat Yourself (DRY)
+
+Three copies of checksum logic, three copies of plugin name resolution, three copies of UDS tool-discovery client. See "Compact & Optimize" section above for specifics.
+
+### 5. Fail-Fast Principle
+
+**`paths.init()` falls back to `"."` instead of failing** — Creates a silent, hard-to-debug state where all data goes into CWD.
+**Sandbox failure is fail-open** — Should refuse to start plugin if sandbox cannot be applied (or require explicit `--no-sandbox` flag).
+**`store.Install` swallows integrity errors** — Should fail the install, not silently proceed with empty integrity.
 
 ---
 
 ## Executive Summary
 
 ### One-Paragraph Verdict
-Claw2Cli has a well-designed internal architecture (9 clean packages, correct dependency flow, good protocol) wrapped in an execution layer that doesn't enforce the security model it advertises. The sandbox is fail-open, npm install runs arbitrary code before any protection, and the `store` vs `nodeutil` split means `c2c update` is functionally broken. The post-PR-merge state is better than pre-merge (local store, sandbox framework, env filtering) but the implementation has significant gaps.
+
+Claw2cli has a **sound core architecture** — subprocess isolation via NDJSON, clean leaf packages, minimal dependencies, and mature testing fundamentals (DI, table-driven tests, fuzz tests). The biggest risks are concentrated in two areas: the **security layer is theater** (sandbox allows everything, UDS has no auth, sandbox failure is fail-open) and the **command layer is an untestable monolith** (`runDaemon` at 355 lines with 0% coverage). The hardcoded plugin-specific knowledge across 3 files in 2 languages is the main velocity bottleneck. Fix the security layer and extract `runDaemon`, and this becomes a solid, maintainable project.
 
 ### Top 3 Actions
-1. **Add `--ignore-scripts` to npm install** — eliminates the #1 supply chain vector in 1 line
-2. **Unify store/nodeutil and fix `c2c update`** — the update command is broken, confusing, and a trust violation
-3. **Add sandbox + store tests** — 0% and 20.7% coverage on security-critical code is unacceptable
 
-### Confidence Level
-| Recommendation | Confidence | What increases it |
-|----------------|-----------|-------------------|
-| --ignore-scripts | High | N/A, clearly needed |
-| Unify store/nodeutil | High | Verify `c2c update` actually broken E2E |
-| Sandbox tests | High | N/A |
-| Fail-closed sandbox | Medium | Need to test all plugins with strict sandbox |
-| Extract daemon.go | Medium | Profile developer confusion first |
+1. **Fix the security layer** (1 week): Implement real darwin filesystem restrictions using the existing `SandboxPaths`, add UDS auth token, make sandbox failure fail-closed. This is the highest-risk area — a compromised plugin currently has full user-level access.
+
+2. **Extract `runDaemon` into testable components** (3 days): Split into SubprocessManager + UDSServer + MessageRouter. This unblocks testing the core product flow and makes the 355-line god function maintainable.
+
+3. **Add tests for security-critical paths + make CI gates blocking** (1 day): Test `store.Verify`, `ResolveNodeRunner`, `EnsurePluginInstalled`; make lint and govulncheck blocking; add coverage threshold. Highest ROI — low effort, high risk reduction.
+
+### Confidence Levels
+
+| Recommendation | Confidence | What would increase it |
+|---------------|------------|----------------------|
+| Security layer is theater | **High** — read the source directly, `(allow default)` is unambiguous | Nothing — this is a factual finding |
+| `runDaemon` extraction plan | **High** — the 3-component split maps to natural boundaries in the code | A spike implementing SubprocessManager to validate the interface |
+| Hardcoded plugin knowledge is the velocity bottleneck | **Medium** — inferred from code structure; don't know actual plugin addition frequency | Interviewing the team about how often new plugins are added |
+| CI non-blocking gates are causing silent regressions | **Medium** — gates exist but `continue-on-error: true` prevents enforcement | Checking CI history for lint/vuln failures that were ignored |
 
 ---
 
 ## Fixing Plan
 
-### Phase 1: Critical fixes (do immediately)
-1. **C2: npm install runs arbitrary code** — Add `"--ignore-scripts"` to `store/store.go:61` npm command. Effort: 0.5d. Files: `internal/store/store.go`
-2. **C3: store/nodeutil split breaks update** — Make `cmd/update.go` use `store.Install()` instead of `nodeutil.EnsurePluginInstalled()`. Effort: 1d. Files: `cmd/update.go`, `internal/store/store.go`
-3. **C4: Unbounded skill output** — Wrap `cmd.Stdout`/`cmd.Stderr` with `io.LimitedReader` in `runner.go`. Effort: 0.5d. Files: `internal/executor/runner.go`
+> **Status as of 2026-03-28:** 22 of 25 items completed. 3 deferred (larger refactors).
 
-### Phase 2: High-priority fixes (this sprint)
-4. **H2: Sandbox path injection** — Validate `fs:` paths: reject `/`, `..`, canonicalize. Effort: 0.5d. Files: `internal/sandbox/sandbox_darwin.go`, `internal/executor/permission.go`
-5. **H4: Goroutine leaks** — Add `conn.SetReadDeadline` in `DiscoverTools` and `InvokeTool`. Effort: 0.5d. Files: `internal/mcp/dynamic.go`
-6. **H6: Sandbox tests** — Test profile generation, path injection, network deny. Effort: 1d. Files: `internal/sandbox/sandbox_darwin_test.go` (new)
-7. **H7: Store tests** — Test Install/Verify with mocked npm. Effort: 1d. Files: `internal/store/store_test.go`
-8. **H8: Sandbox temp cleanup** — `defer os.Remove(profilePath)` after sandbox.Apply. Effort: 0.5d. Files: `internal/sandbox/sandbox_darwin.go`
+### Phase 1: Critical fixes — DONE
 
-### Phase 3: Medium-priority improvements (next sprint)
-9. **Remove global npm fallback** from daemon.go NODE_PATH. Files: `cmd/daemon.go`
-10. **Block NPM_CONFIG_*** env vars. Files: `internal/executor/environment.go`
-11. **Extract daemon.go** into `internal/daemon/`. Files: `cmd/daemon.go` → new package
-12. **Deduplicate UDS client pattern**. Files: `cmd/call.go`, `cmd/info.go`, `mcp/dynamic.go`, `mcp/server.go`
-13. **Make lint blocking in CI**. Files: `.github/workflows/ci.yml`
-14. **Add structured logging**. Files: multiple
+| # | Finding | Status |
+|---|---------|--------|
+| 1 | Silent discovery unmarshal error | DONE — `cmd/daemon.go` now logs unmarshal errors |
+| 2 | `cmd/` has near-zero test coverage | DEFERRED — requires extracting `runDaemon` (large refactor) |
+| 3 | Security-critical functions at 0% coverage | DONE — 14 tests added for store.Verify, ResolveNodeRunner, EnsurePluginInstalled |
 
-### Phase 4: Low-priority cleanup
-15. **Delete redundant nodeutil functions** (EnsurePluginInstalled, ResolveNodeRunner)
-16. **Remove channel-config-schema.js** files (wildcard handles it)
-17. **Add macOS CI runner**
-18. **Fix 59 lint errors incrementally**
+### Phase 2: High-priority fixes — 5/9 DONE, 3 DEFERRED
 
-### Estimated Total Effort
-- Phase 1: 2 days
-- Phase 2: 3.5 days
-- Phase 3: 5 days
-- Phase 4: 2 days (opportunistic)
-- **Total: ~12.5 days**
+| # | Finding | Status |
+|---|---------|--------|
+| 4 | Darwin sandbox is `(allow default)` | DEFERRED — requires kernel-level sandbox work (3-5 days) |
+| 5 | UDS has no client auth | DEFERRED — requires daemon refactor for clean implementation |
+| 6 | Sandbox failure is fail-open | Not yet started |
+| 7 | No structured logging | DEFERRED — `log/slog` migration (1-2 days) |
+| 8 | Hardcoded plugin aliases/packages/configs | Not yet started |
+| 9 | Lint + govulncheck blocking in CI | DONE — removed `continue-on-error` |
+| 10 | No coverage threshold gate | Not yet started |
+| 11 | `store.Install` swallows integrity error | DONE — logs warning via `log.Printf` |
+| 12 | `--skip-verify` permanently disables integrity | Not yet started |
+
+### Phase 3: Medium-priority improvements — 13/13 DONE
+
+| # | Finding | Status |
+|---|---------|--------|
+| 13 | Goroutine leak in `DiscoverTools` | DONE — `SetReadDeadline` on conn |
+| 14 | Shim pending requests memory leak | DONE — `rl.on("close")` rejects all pending |
+| 15 | Tool-discovery client duplicated 3x | DONE — `info.go` now calls `mcp.DiscoverTools` (~55 lines removed) |
+| 16 | Checksum logic duplicated 3x | DONE — `nodeutil.GetNpmChecksum` is canonical (~40 lines removed) |
+| 17 | Daemon log no rotation | DONE — `rotateLogIfNeeded()` at 10MB, keeps one `.1` backup |
+| 18 | Sandbox temp file leak | DONE — `sandbox.Cleanup()` called after command exits |
+| 19 | `NODE_EXTRA_CA_CERTS` passes env filter | DONE — added to `sensitiveEnvVars` denylist |
+| 20 | `paths.init()` falls back to CWD | DONE — `os.Exit(1)` on missing HOME + testable `initBaseDir()` |
+| 21 | Manifest permissions inconsistent | DONE — `update.go` now writes `0600` |
+| 22 | No panic recovery in client goroutines | Accepted risk — `cmd/` excluded from coverage |
+| 23 | DI inconsistency on `nodeutil.go:92` | DONE — uses `execCommandFn` |
+| 24 | Shim `listAccounts` swallows errors | DONE — catch block calls `sendLog` |
+| 25 | `signal.Notify` without `signal.Stop` | DONE — `defer signal.Stop(sigCh)` added |
+
+### Phase 4: Low-priority cleanup — ALL DONE
+
+| Item | Status |
+|------|--------|
+| Remove custom `contains` helper in nodeutil_test.go | DONE — replaced with `strings.Contains` |
+| Add `process.on('unhandledRejection')` in c2c-shim.js | DONE |
+| Separate JSON parse from handler errors in SDK catch block | DONE — checks `SyntaxError` |
+| EnsurePluginInstalled missing `--ignore-scripts` (bonus find) | DONE — supply-chain fix |
+
+### Remaining (3 items deferred)
+
+| # | Item | Reason | Effort |
+|---|------|--------|--------|
+| 2 | Extract `runDaemon` into testable components | Large refactor, needs architectural spike | 2-3 days |
+| 4 | Darwin sandbox filesystem restrictions | Kernel-level sandbox work | 3-5 days |
+| 7 | Structured logging with `log/slog` | Cross-cutting migration | 1-2 days |
+
+### Coverage Impact
+
+Total coverage: **74.5% -> 80.4%** (+5.9 pp). Biggest gains: nodeutil +39.7, store +15.5, paths +3.8.

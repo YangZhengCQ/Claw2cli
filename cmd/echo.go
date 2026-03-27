@@ -35,6 +35,7 @@ Useful for verifying the full bidirectional message flow.`,
 		// Handle Ctrl+C
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
 
 		doneCh := make(chan struct{})
 		go func() {

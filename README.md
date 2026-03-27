@@ -9,6 +9,8 @@
 
 > Bring your own Skills, we provide the Secure Runtime.
 > Wrap OpenClaw plugins as standard CLI tools. No Docker, no browser, just a binary.
+>
+> Last updated: 2026-03-28
 
 ## Why
 
@@ -100,6 +102,7 @@ Discovered 2 tool(s) for "wechat":
 | `c2c list` | List installed plugins |
 | `c2c info <plugin>` | Show plugin details (+ discovered tools if running) |
 | `c2c install <package>` | Install an OpenClaw plugin |
+| `c2c update [plugin]` | Update installed plugins to latest version |
 | `c2c mcp serve` | Start MCP server over stdio (includes discovered tools) |
 
 ## Capability Discovery

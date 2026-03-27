@@ -133,7 +133,7 @@ func updateSinglePlugin(manifest *parser.PluginManifest) (bool, error) {
 	}
 
 	manifestPath := filepath.Join(paths.PluginDir(manifest.Name), "manifest.yaml")
-	if err := os.WriteFile(manifestPath, manifestData, 0644); err != nil {
+	if err := os.WriteFile(manifestPath, manifestData, 0600); err != nil {
 		return false, fmt.Errorf("write manifest: %w", err)
 	}
 

@@ -89,6 +89,11 @@ func TestIsSafeEnvVar(t *testing.T) {
 		{"DATABASE_URL=postgres://", false},
 		{"OPENAI_API_KEY=sk-123", false},
 		{"SECRET_KEY=abc", false},
+		// Security: NODE_EXTRA_CA_CERTS could enable MITM on plugin TLS traffic
+		{"NODE_EXTRA_CA_CERTS=/path/to/evil-ca.pem", false},
+		// Existing sensitive NODE_ vars remain blocked
+		{"NODE_AUTH_TOKEN=secret", false},
+		{"NODE_OPTIONS=--require=evil.js", false},
 	}
 
 	for _, tt := range tests {

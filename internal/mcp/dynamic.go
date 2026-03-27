@@ -31,6 +31,12 @@ func DiscoverTools(connectorName string) ([]protocol.ToolSchema, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	// Set read deadline so the scanner goroutine unblocks promptly on timeout
+	// instead of leaking until conn.Close() fires.
+	if tc, ok := conn.(interface{ SetReadDeadline(time.Time) error }); ok {
+		tc.SetReadDeadline(time.Now().Add(6 * time.Second)) // slightly longer than context
+	}
+
 	type discoverResult struct {
 		tools []protocol.ToolSchema
 		err   error
@@ -98,6 +104,11 @@ func InvokeTool(connectorName, toolName string, args json.RawMessage) (json.RawM
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Set read deadline so the scanner goroutine unblocks promptly on timeout
+	if tc, ok := conn.(interface{ SetReadDeadline(time.Time) error }); ok {
+		tc.SetReadDeadline(time.Now().Add(31 * time.Second))
+	}
 
 	type result struct {
 		payload json.RawMessage

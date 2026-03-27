@@ -56,7 +56,7 @@ Claw2Cli is a **Go CLI compatibility layer** that extracts high-quality plugins 
 ### 3.2 Connectors (Stateful)
 
 - Long-lived daemon maintaining persistent connections (WeChat, Feishu, etc.)
-- Invocation: `c2c connect <connector>` (foreground by default, `-b` for background)
+- Invocation: `c2c connect <connector>` (background daemon by default, `-f` for foreground)
 - Permissions: controlled elevated (network + persistent storage + credentials)
 
 | Dimension | Skill | Connector |
@@ -222,7 +222,7 @@ User / Agent / Script
 
 **Runtime sandbox (implemented):**
 - macOS: `sandbox-exec` with `(allow default)` + selective deny (network blocked if not declared)
-- Linux: seccomp-bpf stub (placeholder)
+- Linux: stub implementation — logs warning, no restrictions enforced (landlock/seccomp planned for future)
 - Disable with `--no-sandbox` flag for debugging
 - Local package store: plugins installed to `~/.c2c/plugins/<name>/node_modules/` — zero network calls at runtime, conflicting transitive deps (openclaw, clawdbot, pi-ai) auto-cleaned after install
 
@@ -235,8 +235,8 @@ User / Agent / Script
   ├── sockets/<name>.sock            # UDS (connectors only)
   ├── pids/<name>.pid                # PID file (connectors only)
   ├── pids/<name>.json               # Metadata (connectors only)
-  ├── logs/<name>.log                # Daemon logs (connectors only)
-  └── bin/tsx                         # Local tsx binary (TypeScript executor)
+  ├── logs/<name>.log                # Daemon logs (created on-demand at daemon start, rotated at 10MB)
+  └── bin/tsx                         # Local tsx binary (created on-demand when tsx is first installed)
 ```
 
 ### 4.8 MCP Server
@@ -552,7 +552,7 @@ The shim's bridge functions wrap plugin internals into clean, agent-friendly ope
 | UDS protocol | NDJSON | Native Go Scanner + JS readline support |
 | Node runner | tsx first, node fallback | Plugins ship ESM + TS source, no pre-compiled JS |
 | Connect default | Background daemon, `-f` for foreground | Daemon is the standard use case; foreground only for debugging/QR login |
-| Shutdown timeout | SIGTERM → 3s → SIGKILL | Prevent blocking from pending `get_reply` |
+| Shutdown timeout | SIGTERM → 9s (shim) / 5s (PID stop) → SIGKILL | Prevent blocking from pending `get_reply` |
 | CLI vs runtime pkg | Auto-detect and install both | `-cli` suffix = installer wrapper, strip for runtime |
 | Security strategy | Phase 1: hash + declarative perms; Phase 2: runtime sandbox | Layered defense, don't block delivery |
 | Capability discovery | Shim introspects at runtime, not from static config | Captures actual plugin state; adding new plugins needs zero daemon changes |

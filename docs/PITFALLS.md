@@ -1,6 +1,6 @@
 # 踩坑记录
 
-> 最后更新：2026-03-23
+> 最后更新：2026-03-28
 
 记录 Claw2Cli 开发过程中遇到的关键问题、排查过程和解决方案。
 
@@ -220,3 +220,88 @@ if (!accountId && registeredChannel.config?.listAccountIds) {
 ```
 
 **教训：** Bridge 函数要对调用者友好——能自动推断的参数就不要强制要求。单账号场景是最常见的 case。
+
+---
+
+## 11. `EnsurePluginInstalled` 缺少 `--ignore-scripts`
+
+> 添加于 2026-03-28，由 grill report TDD 审查发现
+
+**现象：** `store.Install()` 正确使用了 `--ignore-scripts`，但 `nodeutil.EnsurePluginInstalled()` 的 `npm install -g` 调用没有这个 flag。
+
+**根因：** 两个独立的安装路径——本地安装（store）和全局安装（nodeutil）——分别实现，全局路径遗漏了安全 flag。
+
+**影响：** 供应链攻击向量：恶意 npm 包可以通过 `postinstall` 脚本在全局安装时执行任意代码。
+
+**解决方案：** 在 `nodeutil.go:148` 的 `npm install -g` 命令中添加 `--ignore-scripts` flag。
+
+**教训：** 当同一个操作有多个代码路径时（本地 vs 全局安装），安全策略必须在所有路径中一致实施。代码重复是安全漏洞的温床。
+
+---
+
+## 12. `NODE_EXTRA_CA_CERTS` 通过环境变量过滤
+
+> 添加于 2026-03-28，由 grill report 安全审查发现
+
+**现象：** 环境变量过滤器阻止了 `NODE_OPTIONS`（防止 `--require` 注入）和 `NODE_AUTH_TOKEN`，但允许 `NODE_EXTRA_CA_CERTS` 通过。
+
+**根因：** `NODE_EXTRA_CA_CERTS` 匹配 `NODE_` 安全前缀，但未被列入 `sensitiveEnvVars` 黑名单。
+
+**影响：** 攻击者如果能控制父进程环境，可以注入恶意 CA 证书，对插件的所有 TLS 连接进行中间人攻击。
+
+**解决方案：** 将 `NODE_EXTRA_CA_CERTS=` 添加到 `environment.go` 的 `sensitiveEnvVars` 黑名单中。
+
+**教训：** 环境变量白名单（`NODE_` 前缀）+ 黑名单（`sensitiveEnvVars`）的组合方案要定期审查。新的安全敏感变量可能匹配白名单前缀。
+
+---
+
+## 13. empty array 在 allowlist 函数间语义不一致
+
+> 添加于 2026-03-28，由 TDD 测试明确记录
+
+**现象：** `checkSenderAllowlist([])` 阻止所有发送者，但 `isNormalizedSenderAllowed(id, [])` 允许所有发送者。
+
+**根因：** 两个函数的空数组检查逻辑不同：
+- `checkSenderAllowlist`：空数组是 truthy，`[].includes(x)` 永远返回 false → 阻止
+- `isNormalizedSenderAllowed`：`allowList.length === 0` 时 early return true → 允许
+
+**影响：** 插件作者使用错误的函数可能意外允许或阻止未授权访问。
+
+**当前状态：** 测试明确记录了这个分歧（`shim/test/auth.test.js` Suite A #4 vs Suite E #3），但未修改行为（需要与上游 OpenClaw SDK 保持兼容）。
+
+**教训：** API 设计中，相似函数的边界行为必须一致或明确记录。空集合的语义（"无限制" vs "全部阻止"）是常见的歧义来源。
+
+---
+
+## 14. npm 发布新版导致 checksum 不匹配
+
+> 添加于 2026-03-28，E2E 测试时发现
+
+**现象：** `c2c connect wechat -f` 启动失败，报错 `checksum mismatch for @tencent-weixin/openclaw-weixin-cli@latest: expected sha512-TRs..., got sha512-BTU...`。
+
+**排查过程：**
+1. manifest.yaml 中记录的 integrity hash 是安装时的值
+2. `@latest` tag 指向的包内容已变（npm 发布了新版本或重新发布）
+3. `GetNpmChecksum` 查询到新 hash，与 manifest 中记录的旧 hash 不匹配
+
+**根因：** 使用 `@latest` 作为 source 时，npm registry 的 `dist.integrity` 会随版本更新而变化。这是完整性校验正确工作的表现，不是 bug。
+
+**解决方案：** 使用 `c2c update wechat` 重新安装并更新 manifest 中的 hash。
+
+**教训：** 完整性校验 + `@latest` tag 的组合意味着每次上游发版都需要 `c2c update`。未来可考虑将 `resolved_version` 锁定为具体版本号（如 `2.0.1`），仅在显式 update 时升级。
+
+---
+
+## 15. 微信长连接导致优雅关闭超时
+
+> 添加于 2026-03-28，E2E 测试时观察到
+
+**现象：** `c2c connect wechat -f` 收到 SIGTERM 后，shim 未在 9 秒内退出，被 SIGKILL 强制终止。日志显示 `shim did not exit in time, force killing`。
+
+**根因：** 微信插件的 `startAccount` 启动了一个长轮询（long-poll）连接到微信服务器。收到 SIGTERM 后，`abortController.abort()` 触发，但长轮询请求可能正在 `await` 中，HTTP 连接关闭需要时间。
+
+**当前状态：** 功能正常——SIGKILL 能确保进程退出。但 `force killing` 意味着：
+- 微信 API 连接未正常断开（服务端会在超时后自动清理）
+- 任何正在进行的消息发送可能丢失
+
+**后续方向：** 可考虑增大 `shimShutdownTimeout`（从 9s 到 15s），或在 shim 中为长轮询请求设置 `AbortSignal` 的超时传播，使 HTTP 请求能更快中断。

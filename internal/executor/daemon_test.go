@@ -578,3 +578,74 @@ func TestWaitForReady_Timeout(t *testing.T) {
 func contains(s, sub string) bool {
 	return strings.Contains(s, sub)
 }
+
+func TestRotateLogIfNeeded_SmallFile(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "test.log")
+	os.WriteFile(logPath, []byte("small log"), 0600)
+
+	rotateLogIfNeeded(logPath)
+
+	// File should still exist (not rotated)
+	if _, err := os.Stat(logPath); err != nil {
+		t.Error("small log should not be rotated")
+	}
+	// No .1 file should exist
+	if _, err := os.Stat(logPath + ".1"); err == nil {
+		t.Error("small log should not create .1 backup")
+	}
+}
+
+func TestRotateLogIfNeeded_LargeFile(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "test.log")
+
+	// Create a file larger than maxLogSize (10 MB)
+	f, _ := os.Create(logPath)
+	f.Truncate(maxLogSize + 1)
+	f.Close()
+
+	rotateLogIfNeeded(logPath)
+
+	// Original should be gone (renamed)
+	if _, err := os.Stat(logPath); err == nil {
+		t.Error("large log should be renamed away")
+	}
+	// .1 backup should exist
+	info, err := os.Stat(logPath + ".1")
+	if err != nil {
+		t.Fatal("large log should be rotated to .1")
+	}
+	if info.Size() != maxLogSize+1 {
+		t.Errorf("backup size should be %d, got %d", maxLogSize+1, info.Size())
+	}
+}
+
+func TestRotateLogIfNeeded_NonexistentFile(t *testing.T) {
+	// Should not panic on missing file
+	rotateLogIfNeeded("/nonexistent/path/test.log")
+}
+
+func TestRotateLogIfNeeded_OverwritesPreviousBackup(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "test.log")
+
+	// Create old backup
+	os.WriteFile(logPath+".1", []byte("old backup"), 0600)
+
+	// Create large current log
+	f, _ := os.Create(logPath)
+	f.Truncate(maxLogSize + 100)
+	f.Close()
+
+	rotateLogIfNeeded(logPath)
+
+	// Old backup should be overwritten
+	data, err := os.ReadFile(logPath + ".1")
+	if err != nil {
+		t.Fatal("backup should exist")
+	}
+	if string(data) == "old backup" {
+		t.Error("old backup should be overwritten, not preserved")
+	}
+}

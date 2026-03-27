@@ -30,6 +30,7 @@ var attachCmd = &cobra.Command{
 		// Handle Ctrl+C
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
 
 		// Stream messages to stdout
 		doneCh := make(chan struct{})

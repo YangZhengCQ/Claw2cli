@@ -21,3 +21,15 @@ type SandboxPaths struct {
 func Apply(cmd *exec.Cmd, manifest *parser.PluginManifest, paths SandboxPaths) error {
 	return applyPlatform(cmd, manifest, paths)
 }
+
+// cleanupFn is set by platform-specific code to clean up temp files after sandbox exits.
+var cleanupFn func()
+
+// Cleanup removes any temporary files created during sandbox setup.
+// Call this after the sandboxed command has exited.
+func Cleanup() {
+	if cleanupFn != nil {
+		cleanupFn()
+		cleanupFn = nil
+	}
+}

@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"crypto/sha512"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/YangZhengCQ/Claw2cli/internal/nodeutil"
 	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 	"github.com/YangZhengCQ/Claw2cli/internal/paths"
 	"github.com/YangZhengCQ/Claw2cli/internal/store"
@@ -71,7 +69,7 @@ func installPlugin(source, pType string) error {
 	fmt.Printf("Installing %q as %q (%s)...\n", source, name, pType)
 
 	// Get package info and checksum from npm
-	checksum, err := getNpmChecksum(source)
+	checksum, err := nodeutil.GetNpmChecksum(source)
 	if err != nil {
 		if !skipVerify {
 			return fmt.Errorf("could not verify package integrity: %w\n  To install without verification, use: c2c install --skip-verify %s", err, source)
@@ -201,32 +199,3 @@ func derivePluginName(source string) string {
 	return s
 }
 
-// getNpmChecksum runs `npm info` to get the package's shasum.
-func getNpmChecksum(source string) (string, error) {
-	// Query npm info for the exact package spec (including version if specified)
-	out, err := exec.Command("npm", "info", source, "--json").Output()
-	if err != nil {
-		return "", err
-	}
-
-	var info struct {
-		Dist struct {
-			Shasum   string `json:"shasum"`
-			Integrity string `json:"integrity"`
-		} `json:"dist"`
-	}
-	if err := json.Unmarshal(out, &info); err != nil {
-		return "", err
-	}
-
-	if info.Dist.Integrity != "" {
-		return info.Dist.Integrity, nil
-	}
-	if info.Dist.Shasum != "" {
-		return "sha1:" + info.Dist.Shasum, nil
-	}
-
-	// Fallback: compute our own hash from the npm info output
-	h := sha512.Sum512(out)
-	return "sha512:" + hex.EncodeToString(h[:]), nil
-}

@@ -1,14 +1,11 @@
 package cmd
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/YangZhengCQ/Claw2cli/internal/executor"
+	"github.com/YangZhengCQ/Claw2cli/internal/mcp"
 	"github.com/YangZhengCQ/Claw2cli/internal/parser"
 	"github.com/YangZhengCQ/Claw2cli/internal/protocol"
 )
@@ -70,60 +67,10 @@ var infoCmd = &cobra.Command{
 }
 
 func queryDiscoveredTools(name string) []protocol.ToolSchema {
-	conn, err := executor.AttachConnector(name)
+	tools, err := mcp.DiscoverTools(name)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: tool discovery failed: %v\n", err)
 		return nil
 	}
-	defer conn.Close()
-
-	reqID := fmt.Sprintf("info-%d", time.Now().UnixNano())
-	msg := protocol.NewCommand("c2c-info", "list_tools", reqID, nil)
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return nil
-	}
-	if _, err := conn.Write(append(data, '\n')); err != nil {
-		return nil
-	}
-
-	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-
-	deadline := time.After(3 * time.Second)
-	type discoverResult struct {
-		tools []protocol.ToolSchema
-		err   error
-	}
-	resultCh := make(chan discoverResult, 1)
-
-	go func() {
-		for scanner.Scan() {
-			var resp protocol.Message
-			if json.Unmarshal(scanner.Bytes(), &resp) != nil {
-				continue
-			}
-			if resp.ID == reqID && resp.Type == protocol.TypeError {
-				resultCh <- discoverResult{err: fmt.Errorf("[%s] %s", resp.Code, resp.MessageStr)}
-				return
-			}
-			if resp.ID == reqID && resp.Type == protocol.TypeResponse {
-				var dp protocol.DiscoveryPayload
-				if json.Unmarshal(resp.Payload, &dp) == nil {
-					resultCh <- discoverResult{tools: dp.Tools}
-				}
-				return
-			}
-		}
-	}()
-
-	select {
-	case r := <-resultCh:
-		if r.err != nil {
-			fmt.Fprintf(os.Stderr, "warning: tool discovery failed: %v\n", r.err)
-			return nil
-		}
-		return r.tools
-	case <-deadline:
-		return nil
-	}
+	return tools
 }

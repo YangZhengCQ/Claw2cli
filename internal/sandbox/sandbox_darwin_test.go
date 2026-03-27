@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -56,6 +57,45 @@ func TestIsUnsafeFsPath(t *testing.T) {
 			t.Errorf("isUnsafeFsPath(%q) should be false (safe path)", p)
 		}
 	}
+}
+
+func TestWriteTempProfile_CreatesFile(t *testing.T) {
+	path, err := writeTempProfile("(version 1)\n(allow default)\n")
+	if err != nil {
+		t.Fatalf("writeTempProfile failed: %v", err)
+	}
+	defer os.Remove(path)
+
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("temp profile file should exist at %s", path)
+	}
+}
+
+func TestCleanup_RemovesTempProfile(t *testing.T) {
+	// Create a temp profile via the sandbox
+	path, err := writeTempProfile("(version 1)\n")
+	if err != nil {
+		t.Fatalf("writeTempProfile failed: %v", err)
+	}
+
+	// Simulate what applyPlatform does
+	cleanupFn = func() { os.Remove(path) }
+
+	// Verify file exists before cleanup
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("profile should exist before cleanup: %v", err)
+	}
+
+	// Run cleanup
+	Cleanup()
+
+	// Verify file is gone
+	if _, err := os.Stat(path); err == nil {
+		t.Error("profile should be removed after Cleanup()")
+	}
+
+	// Verify cleanup is idempotent
+	Cleanup() // should not panic
 }
 
 func TestGenerateProfile_ValidSBPL(t *testing.T) {

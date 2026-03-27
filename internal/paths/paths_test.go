@@ -91,6 +91,27 @@ func TestEnsureDirs_PermissionError(t *testing.T) {
 	}
 }
 
+func TestInitBaseDir_RejectsEmptyHome(t *testing.T) {
+	// initBaseDir should return an error when HOME cannot be determined,
+	// rather than silently falling back to CWD
+	err := initBaseDir("")
+	if err == nil {
+		t.Error("initBaseDir('') should return an error, not silently fall back to CWD")
+	}
+}
+
+func TestInitBaseDir_ValidHome(t *testing.T) {
+	dir := t.TempDir()
+	err := initBaseDir(dir)
+	if err != nil {
+		t.Fatalf("initBaseDir with valid dir should succeed, got: %v", err)
+	}
+	expected := filepath.Join(dir, ".c2c")
+	if BaseDir() != expected {
+		t.Errorf("expected base dir %q, got %q", expected, BaseDir())
+	}
+}
+
 func TestEnsureStorageDir(t *testing.T) {
 	dir := t.TempDir()
 	SetBaseDir(dir)

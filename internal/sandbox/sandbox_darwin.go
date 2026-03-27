@@ -32,6 +32,9 @@ func applyPlatform(cmd *exec.Cmd, manifest *parser.PluginManifest, paths Sandbox
 	cmd.Args = append([]string{"sandbox-exec", "-f", profilePath}, originalArgs...)
 	_ = originalPath // used implicitly via originalArgs[0]
 
+	// Register cleanup for the temp profile after command exits
+	cleanupFn = func() { os.Remove(profilePath) }
+
 	return nil
 }
 

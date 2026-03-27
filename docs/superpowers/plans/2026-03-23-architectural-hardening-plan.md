@@ -1057,11 +1057,23 @@ git commit -m "feat: integrate OS sandbox into daemon subprocess launch"
 **Files:**
 - Modify: `shim/node_modules/@openclaw/plugin-sdk/index.js`
 
-- [ ] **Step 1: Replace always-allow auth with configurable allowlist**
+- [x] **Step 1: Replace always-allow auth with configurable allowlist**
 
-Find the three auth functions. Replace each with allowlist-checked versions that read from `globalConfig.authorized_senders`. Default null = allow all.
+Implementation already exists in `shim/node_modules/@openclaw/plugin-sdk/index.js` lines 461-534.
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Write comprehensive auth tests**
+
+Completed 2026-03-27 via TDD Guardian. 25 behavior tests in `shim/test/auth.test.js` covering:
+- Suite A: `resolveSenderCommandAuthorization` (6 tests)
+- Suite B: senderId extraction priority (4 tests)
+- Suite C: `resolveSenderCommandAuthorizationWithRuntime` (3 tests)
+- Suite D: `resolveDirectDmAuthorizationOutcome` (5 tests)
+- Suite E: `isNormalizedSenderAllowed` (5 tests, documents empty-array semantic divergence)
+- Suite F: Return shape contracts (2 tests)
+
+See `docs/superpowers/plans/2026-03-27-task11-shim-auth-allowlist.md` for full test plan.
+
+- [ ] **Step 3: Commit**
 
 ```
 git add shim/node_modules/@openclaw/plugin-sdk/index.js
