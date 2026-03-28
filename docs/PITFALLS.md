@@ -336,4 +336,6 @@ if (process.stdin._handle && typeof process.stdin._handle.unref === "function") 
 
 **注意：** `process.stdin.unref()` 不存在（stdin 是 `ReadStream` 不是 `Socket`），必须用 `process.stdin._handle.unref()` 访问底层句柄。
 
-**教训：** `readline.createInterface()` 会隐式地将 stdin 标记为"活跃"，阻止进程退出。任何在模块顶层创建 readline 的库在测试环境中都会遇到这个问题。`_handle.unref()` 是标准的 Node.js 解决方案。
+**注意：** 单独 unref 会破坏 skill-only 插件（无 gateway 循环，依赖 stdin 保活等待 tool 调用）。解决方案是 SDK 中 unref（测试兼容），`c2c-shim.js` 启动时 ref 回来（生产需要）。
+
+**教训：** `readline.createInterface()` 会隐式地将 stdin 标记为"活跃"，阻止进程退出。修改事件循环的保活行为时，必须考虑所有消费者场景（connector vs skill-only vs test）。

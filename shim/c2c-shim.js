@@ -20,6 +20,12 @@ const fs = require("fs");
 const sdk = require("@openclaw/plugin-sdk");
 const { PluginApiShim, sendEvent, sendLog, sendMessage, getRegisteredChannel, getGlobalRuntime, setGlobalConfig, emitToolDiscovery } = sdk._internal;
 
+// Re-ref stdin for production: the SDK unrefs it (for test compatibility),
+// but the shim needs stdin alive to receive tool invocations and daemon commands.
+if (process.stdin._handle && typeof process.stdin._handle.ref === "function") {
+  process.stdin._handle.ref();
+}
+
 const pluginName = process.argv[2] || process.env.C2C_PLUGIN_NAME || "unknown";
 const pluginSource = process.env.C2C_PLUGIN_SOURCE || "";
 const storageDir = process.env.C2C_STORAGE_DIR || "";

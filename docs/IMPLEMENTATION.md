@@ -190,11 +190,12 @@ When the Go daemon crashes or shuts down, `rl.on("close")` rejects all pending r
 immediately instead of waiting for their 5-minute timeouts. This prevents memory leaks
 from accumulated unresolved Promises.
 
-**Stdin unref (2026-03-28):**
-The readline on `process.stdin` keeps the Node.js event loop alive indefinitely. In production
-this is fine (gateway loop keeps process alive), but in tests it prevents `node --test` from
-exiting. Fix: `process.stdin._handle.unref()` after readline creation — allows the process to
-exit when no other work is pending.
+**Stdin unref/ref (2026-03-28):**
+The readline on `process.stdin` keeps the Node.js event loop alive indefinitely. In tests this
+prevents `node --test` from exiting. Fix: SDK calls `process.stdin._handle.unref()` after
+readline creation, and `c2c-shim.js` calls `process.stdin._handle.ref()` at startup to restore
+it for production. This split is needed because skill-only plugins (no gateway loop) rely on
+stdin to stay alive for tool invocations via the readline.
 
 **Error separation:** The `rl.on("line")` catch block distinguishes `SyntaxError` (malformed
 JSON — silently ignored) from other errors (handler bugs — logged via `sendLog`).
