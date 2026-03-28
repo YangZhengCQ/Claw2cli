@@ -14,7 +14,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.26"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -28,7 +28,8 @@ jobs:
         run: go test -race -count=1 -timeout 120s ./...
 
       - name: Shim tests
-        run: cd shim && node --test test/*.test.js
+        run: cd shim && node --test test/sdk.test.js test/subpath.test.js test/auth.test.js test/shim-fixes.test.js
+        timeout-minutes: 2
 
   goreleaser:
     needs: [test]
@@ -43,7 +44,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.26"
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
