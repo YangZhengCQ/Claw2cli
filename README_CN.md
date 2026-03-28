@@ -8,7 +8,7 @@
 [English](README.md)
 
 > Bring your own Skills, we provide the Secure Runtime.
-> 把 OpenClaw 插件变成标准 CLI 工具。无 Docker，无浏览器，只需一个二进制。
+> 把 OpenClaw 插件变成标准 CLI 工具。无 Docker，无浏览器，终端即用。
 >
 > 最后更新：2026-03-28
 

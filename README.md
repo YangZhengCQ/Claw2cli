@@ -8,7 +8,7 @@
 [中文文档](README_CN.md)
 
 > Bring your own Skills, we provide the Secure Runtime.
-> Wrap OpenClaw plugins as standard CLI tools. No Docker, no browser, just a binary.
+> Wrap OpenClaw plugins as standard CLI tools. No Docker, no browser, just your terminal.
 >
 > Last updated: 2026-03-28
 
