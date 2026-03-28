@@ -305,3 +305,35 @@ if (!accountId && registeredChannel.config?.listAccountIds) {
 - 任何正在进行的消息发送可能丢失
 
 **后续方向：** 可考虑增大 `shimShutdownTimeout`（从 9s 到 15s），或在 shim 中为长轮询请求设置 `AbortSignal` 的超时传播，使 HTTP 请求能更快中断。
+
+---
+
+## 16. Shim 测试挂起：readline 阻止 Node.js 进程退出
+
+> 添加于 2026-03-28，CI shim test 超时问题
+
+**现象：** CI 步骤 `node --test shim/test/*.test.js` 所有 38 个测试全部通过，但进程永不退出，2 分钟后被 CI 超时终止。
+
+**排查过程：**
+1. 所有测试结果都是 `ok`，TAP 输出完整
+2. `node --test` 等待事件循环清空才退出
+3. SDK 模块在 `require()` 时执行 `createInterface({ input: process.stdin })`
+4. readline 在 stdin 上注册了活跃监听器，阻止事件循环退出
+
+**根因：** `createInterface()` 创建的 readline 接口让 Node.js 认为还有活跃的 I/O 操作（stdin 监听），因此不会退出。在生产环境中，gateway 循环和 signal handler 负责保持进程存活；但在测试中，测试完成后没有其他工作，进程应该退出但被 readline 阻止了。
+
+**解决方案：**
+```javascript
+const rl = createInterface({ input: process.stdin, terminal: false });
+if (process.stdin._handle && typeof process.stdin._handle.unref === "function") {
+  process.stdin._handle.unref();
+}
+```
+
+`unref()` 告诉 Node.js 这个句柄单独不应阻止进程退出。效果：
+- 测试中：测试完成后进程正常退出（<1s）
+- 生产中：gateway 循环 + signal handler 保持进程存活，unref 无影响
+
+**注意：** `process.stdin.unref()` 不存在（stdin 是 `ReadStream` 不是 `Socket`），必须用 `process.stdin._handle.unref()` 访问底层句柄。
+
+**教训：** `readline.createInterface()` 会隐式地将 stdin 标记为"活跃"，阻止进程退出。任何在模块顶层创建 readline 的库在测试环境中都会遇到这个问题。`_handle.unref()` 是标准的 Node.js 解决方案。

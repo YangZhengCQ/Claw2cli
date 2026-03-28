@@ -145,7 +145,7 @@ func runDaemon(name string) error {
 	os.Remove(socketPath) // Clean up stale socket
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
-		pluginCmd.Process.Kill()
+		_ = pluginCmd.Process.Kill()
 		return fmt.Errorf("listen on socket: %w", err)
 	}
 	defer listener.Close()

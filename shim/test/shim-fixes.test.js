@@ -27,7 +27,10 @@ describe("pending request cleanup on stdin close", () => {
 		// module state (stdoutClosed) which would break subsequent tests.
 		const sdk = require("@openclaw/plugin-sdk");
 		const rl = sdk._internal.getRl();
-		const closeHandler = rl.rawListeners("close")[0];
+		const listeners = rl.rawListeners("close");
+		// Find our handler (skip native readline internals)
+		const closeHandler = listeners.find((fn) => fn.toString().includes("stdoutClosed"));
+		assert.ok(closeHandler, "should have a custom close handler (not just native)");
 		const src = closeHandler.toString();
 
 		assert.ok(src.includes("pendingRequests"), "close handler should reference pendingRequests");

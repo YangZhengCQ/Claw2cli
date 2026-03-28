@@ -78,8 +78,8 @@ func StartConnector(manifest *parser.PluginManifest) error {
 
 	// cleanup kills the child process if post-start operations fail
 	cleanup := func() {
-		cmd.Process.Kill()
-		cmd.Process.Wait()
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
 		cleanupConnectorFiles(manifest.Name)
 	}
 
@@ -111,8 +111,8 @@ func StartConnector(manifest *parser.PluginManifest) error {
 	}
 
 	// Detach — don't wait for the child
-	cmd.Process.Release()
-	logFile.Close()
+	_ = cmd.Process.Release()
+	_ = logFile.Close()
 
 	// Wait for daemon to become ready
 	if err := waitForReady(manifest.Name, 10*time.Second); err != nil {
@@ -120,7 +120,7 @@ func StartConnector(manifest *parser.PluginManifest) error {
 		if pidData, e := os.ReadFile(pidPath); e == nil {
 			if pid, e := strconv.Atoi(strings.TrimSpace(string(pidData))); e == nil {
 				if p, e := os.FindProcess(pid); e == nil {
-					p.Signal(syscall.SIGKILL)
+					_ = p.Signal(syscall.SIGKILL)
 				}
 			}
 		}
@@ -209,14 +209,14 @@ func StopConnector(name string) error {
 	// Wait briefly for process to exit
 	done := make(chan struct{})
 	go func() {
-		process.Wait()
+		_, _ = process.Wait()
 		close(done)
 	}()
 
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		process.Signal(syscall.SIGKILL)
+		_ = process.Signal(syscall.SIGKILL)
 		<-done
 	}
 
@@ -329,7 +329,9 @@ func rotateLogIfNeeded(logPath string) {
 	}
 	prevPath := logPath + ".1"
 	os.Remove(prevPath)
-	os.Rename(logPath, prevPath)
+	if err := os.Rename(logPath, prevPath); err != nil {
+		log.Printf("warning: log rotation failed: %v", err)
+	}
 }
 
 // cleanupConnectorFiles removes PID, metadata, and socket files for a connector.

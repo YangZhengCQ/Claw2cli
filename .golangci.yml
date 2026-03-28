@@ -6,6 +6,31 @@ linters:
     - govet
     - staticcheck
     - ineffassign
+    - errcheck
+    - gosec
+  settings:
+    gosec:
+      excludes:
+        - G104
+        - G204
+        - G304
+        - G306
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+  exclusions:
+    rules:
+      # Test files: relax errcheck and gosec
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+      # Cleanup calls: Close, Remove, signal, io.Copy, fmt output — non-actionable errors
+      - linters:
+          - errcheck
+        text: '`(.*\.)?(Close|Remove|RemoveAll|Rename|Kill|Signal|Write|Read|Flush|Copy|Fprint|Fprintf|Fprintln|Scanln|SetReadDeadline|SetWriteDeadline|WriteFile|Truncate|Release)`'
+    paths:
+      - testdata
 
 formatters:
   enable: []
